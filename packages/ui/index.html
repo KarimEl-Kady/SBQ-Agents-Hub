@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SBQ Agents Hub — The Wise AI Workspace</title><link rel="stylesheet" href="./app.css"></head><body>
+<div class="shell">
+ <aside class="sidebar">
+  <div class="brand"><img src="./assets/sbq-symbol.svg" class="brand-symbol" alt="SBQ logo"/><div class="brand-wordmark"><strong>SBQ</strong><span>AGENTS HUB · THE WISE AI WORKSPACE</span></div></div>
+  <div class="section-label">YOUR WORKSPACE</div>
+  <nav aria-label="Workspace navigation">
+   <button class="nav active" data-tab="chat"><span class="nav-glyph">◫</span><span class="nav-label">Chat</span> <span class="nav-shortcut">⌘ 1</span></button>
+   <button class="nav" data-tab="workflow"><span class="nav-glyph">⌘</span><span class="nav-label">Workflows</span></button>
+   <button class="nav" data-tab="accounts"><span class="nav-glyph">⇄</span><span class="nav-label">Connections</span></button>
+   <button class="nav" data-tab="changes"><span class="nav-glyph">&lt;/&gt;</span><span class="nav-label">Code changes</span></button>
+  </nav>
+  <div class="section-label run-label">RECENT SESSIONS <button id="refreshRuns" title="Refresh runs" aria-label="Refresh runs">↻</button></div>
+  <div id="runList" class="runs"><p class="muted small">No runs yet</p></div>
+  <div class="sidebar-bottom">
+   <div class="usage-card"><div class="usage-top"><span>Usage & limits</span><span class="usage-unknown">Not yet available</span></div><p>Quota and cost tracking will appear here after provider-supported signals are implemented.</p></div>
+   <div class="engine-indicator"><i id="engineDot"></i><span id="engineText">Connecting to engine…</span></div>
+   <small>Local engine · Existing account sign-ins</small>
+  </div>
+ </aside>
+ <div class="main">
+  <header class="topbar">
+   <div class="crumb"><span class="brand-mobile">SBQ / </span><span id="pageName">Chat</span><span class="separator">/</span><span class="dim">Workspace</span></div>
+   <div class="top-actions"><span class="top-local"><span class="local-dot"></span> LOCAL WORKSPACE</span><span class="tag" id="runStatus">Ready</span><button id="refresh" class="icon-button" title="Refresh" aria-label="Refresh">↻</button></div>
+  </header>
+  <main class="content">
+   <section class="panel active" id="tab-chat">
+    <div class="workspace-header"><div><div class="eyebrow">ACTIVE PROJECT · MULTI-AGENT RUN</div><h1>Build with intelligence<span class="dot-gold">.</span></h1><p>Your agents, models, and development stages. All in one conversation.</p></div><button id="goWorkflow" class="outline secondary-action">⚙ Edit workflow</button></div>
+    <div class="quick-start"><span class="quick-label">QUICK START</span><span>① Choose project</span><span>② <button class="inline-link" id="quickConnections">Connect agents</button></span><span>③ Run workflow</span></div>
+    <div class="workspace-box"><label for="cwd">CURRENT PROJECT</label><div class="path-wrap"><span>⌁</span><input id="cwd" placeholder="/home/you/projects/your-repository" spellcheck="false" aria-label="Project directory"/></div><span class="hint">Use an existing local project. SBQ never uploads your repository to its own server.</span></div>
+    <div id="flowStrip" class="flow-strip" aria-label="Workflow stages"></div>
+    <div class="workspace-grid">
+     <div class="chat-pane">
+      <div class="pane-head"><div><strong>Agent conversation</strong><span class="pane-subtitle">Live execution, commands, and reviews</span></div><div class="pane-actions"><button id="toggleInspector" class="outline subtle-action mobile-inspector-action" aria-controls="stageInspector" aria-expanded="false">⚙ Stage settings</button><button id="goChanges" class="outline subtle-action">↗ Code changes</button></div></div>
+      <div class="conversation" id="conversation"><div class="welcome"><img src="./assets/sbq-symbol.svg" alt="" class="welcome-symbol"/><h2>What shall we build?</h2><p>Describe your task, or customize the workflow first. SBQ will show each agent's reported activity and its changes as they happen.</p><button id="goWorkflowWelcome" class="outline">Configure your workflow ↗</button></div></div>
+      <div class="composer"><textarea id="task" rows="2" placeholder="Message SBQ — describe a feature, fix, or review…"></textarea><div class="compose-row"><span id="stageCount" class="tiny dim">3 stages configured</span><div><button id="cancelRun" class="outline danger hidden">Stop</button><button id="sendTask" class="primary">Run workflow <span>↗</span></button></div></div></div>
+     </div>
+     <div id="inspectorBackdrop" class="inspector-backdrop" hidden></div><aside class="inspector" id="stageInspector" aria-label="Stage settings">
+      <div class="inspector-head"><div><span class="inspector-icon">⚙</span><strong>Stage configuration</strong></div><div class="inspector-head-actions"><span class="inspector-chip">LIVE EDITOR</span><button type="button" id="closeInspector" class="icon-button inspector-close" aria-label="Close stage settings" title="Close stage settings">×</button></div></div>
+      <p class="inspector-description">Select any stage to customize its role, agent, model and reasoning.</p>
+      <div class="field"><label for="inspectStage">EDIT STAGE</label><select id="inspectStage"></select></div>
+      <div class="inspector-form">
+       <div class="field"><label for="inspectRole">Role</label><select id="inspectRole"></select></div>
+       <div class="field"><label for="inspectAgent">Agent / CLI</label><select id="inspectAgent"></select></div>
+       <div class="field"><label for="inspectModel">Model</label><select id="inspectModel"></select><small id="inspectModelHint" class="model-hint">Loading supported options…</small></div>
+       <div class="field" id="inspectCustomWrap" hidden><label for="inspectCustom">Custom model ID</label><input id="inspectCustom" placeholder="Exact CLI model ID" spellcheck="false"/></div>
+       <div class="field"><label for="inspectEffort">Reasoning effort</label><select id="inspectEffort"></select></div>
+       <div class="field"><label for="inspectInstructions">Stage instructions</label><textarea id="inspectInstructions" rows="4"></textarea></div>
+      </div>
+      <div class="inspector-info"><span>♢</span><div><strong>Safe by default</strong><p>Model access is verified by its CLI when the stage runs. Account quotas aren't fabricated.</p></div></div>
+      <button id="inspectorSave" class="primary wide">Save stage configuration</button>
+     </aside>
+    </div>
+    <div class="preview-section"><div class="preview-head"><div><strong>Code changes</strong><span class="pane-subtitle">Latest Git working-tree diff</span></div><button id="openFullChanges" class="outline subtle-action">Review all files ↗</button></div><div class="preview-body"><div id="miniChangesFiles" class="mini-files">Select a Git project to inspect changes.</div><pre id="miniDiff" class="mini-diff">No diff loaded.</pre></div></div>
+   </section>
+   <section class="panel" id="tab-workflow"><div class="page-heading"><div><span class="eyebrow">BUILD YOUR PIPELINE</span><h1>Workflow builder<span class="dot-gold">.</span></h1><p>Make each stage your own. Assign any runner, model and instructions.</p></div><button id="saveWorkflow" class="primary">Save workflow</button></div><div class="toolbar"><span id="workflowCount">Stages</span><button id="addStage" class="outline">+ Add stage</button></div><div class="stage-list" id="stageList"></div><div class="note">Stages currently run sequentially. Custom model IDs require explicit selection. Automatic review/fix loops, quota-driven switching and spending controls remain future work.</div></section>
+   <section class="panel" id="tab-changes"><div class="page-heading"><div><span class="eyebrow">DIFF VIEWER</span><h1>Code changes<span class="dot-gold">.</span></h1><p>Review actual repository changes before you commit.</p></div><button id="refreshChanges" class="outline">↻ Refresh changes</button></div><div class="review-control"><div class="review-control-title"><strong>AI-assisted code review</strong><span class="hint">Optional. An agent checks the current diff without modifying files.</span></div><div class="review-row"><label class="field">Review runner <select id="reviewAgent"></select></label><label class="field">Review model <select id="reviewModel"></select></label><button id="startReview" class="primary">Review with AI ↗</button></div><label class="field">Review instructions <input id="reviewInstructions" value="Identify defects, missing requirements, security problems and missing tests. Give file-specific actionable findings. Do not modify files."/></label><p id="reviewHint" class="model-hint"></p></div><div id="changesSummary" class="note">Choose a project in Chat to inspect changes.</div><div class="changes-layout"><div id="fileList" class="files-list"></div><div class="diff-column"><div class="diff-header"><strong id="selectedFile">All changes</strong><span class="tiny dim">Unified diff · Read only</span></div><div id="diffPreview" class="diff-preview">No changes to display.</div></div></div></section>
+   <section class="panel" id="tab-accounts"><div class="page-heading"><div><span class="eyebrow">ACCOUNT CONNECTIONS</span><h1>Connect your agents<span class="dot-gold">.</span></h1><p>Reuse official IDE and CLI sign-ins whenever available. You shouldn't need to paste API keys into SBQ.</p></div><button id="checkAccounts" class="outline">↻ Recheck all</button></div><div class="security-banner"><span>♢</span><div><strong>Official sign-in. Your credentials stay with the provider.</strong><p>SBQ opens the agent's interactive login in a native terminal and checks official CLI status where supported. It never copies cookies, keyring secrets or tokens. "Unverified" is not the same as "disconnected".</p></div></div><div id="accountList" class="account-list"><div class="loading">Checking installed agents…</div></div><div class="note">Freebuff has an interactive-only CLI, so it can be launched but not executed as an automatic stage. Kilo Code supports Auto Free; available free models and data policies may change. Antigravity and Gemini CLI reuse existing local sessions when supported but do not currently expose a dependable non-billing status probe here. OpenCode can connect ChatGPT or Claude Agent using its own sign-in flows. Check availability in each CLI.</div></section>
+  </main>
+ </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div><script src="./app.js"></script></body></html>

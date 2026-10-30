@@ -1,0 +1,83 @@
+{
+  "name": "sbq-agents-hub",
+  "private": true,
+  "version": "0.5.1",
+  "description": "SBQ Agents Hub — local-first multi-agent coding workspace for Windows, macOS and Linux",
+  "scripts": {
+    "engine": "node packages/engine/server.mjs",
+    "desktop": "electron apps/desktop/main.cjs",
+    "doctor:linux": "node scripts/linux-doctor.mjs",
+    "sync:extension": "node scripts/sync-extension.mjs",
+    "extension:package": "npm run sync:extension && cd apps/vscode && npx @vscode/vsce package",
+    "check": "node --check packages/engine/server.mjs && node --check packages/engine/models.mjs && node --check packages/engine/git.mjs && node --check apps/desktop/main.cjs && node --check apps/desktop/preload.cjs && node --check apps/vscode/extension.js && node --check packages/ui/app.js",
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "test:integration": "node scripts/integration-test.mjs",
+    "test:sbq": "node scripts/test-sbq.mjs",
+    "setup": "node scripts/first-run.mjs",
+    "package:desktop": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg zip --x64 --arm64",
+    "test:hub": "node scripts/test-hub.mjs",
+    "test:responsive": "node scripts/test-responsive.mjs"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^26.0.0"
+  },
+  "main": "apps/desktop/main.cjs",
+  "productName": "SBQ Agents Hub",
+  "author": "SBQ contributors",
+  "build": {
+    "appId": "com.sbq.agentshub",
+    "productName": "SBQ Agents Hub",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "apps/desktop/**",
+      "packages/engine/**",
+      "packages/ui/**",
+      "package.json",
+      "README.md",
+      "LICENSE",
+      "build/icon.png"
+    ],
+    "extraMetadata": {
+      "main": "apps/desktop/main.cjs"
+    },
+    "artifactName": "sbq-agents-hub-${version}-${os}-${arch}.${ext}",
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "executableName": "sbq-agents-hub",
+      "icon": "build/icon.png"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns"
+    }
+  },
+  "dependencies": {
+    "cross-spawn": "^7.0.6"
+  }
+}

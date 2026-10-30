@@ -1,0 +1,50 @@
+{
+  "name": "sbq-agents-hub",
+  "displayName": "SBQ Agents Hub",
+  "description": "SBQ Agents Hub — multi-agent coding workspace",
+  "version": "0.5.1",
+  "publisher": "sbq-local",
+  "private": true,
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onView:sbqAgentsHub.chat",
+    "onCommand:sbqAgentsHub.open"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "sbqAgentsHub.open",
+        "title": "SBQ: Open Workspace"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sbqAgentsHub",
+          "title": "SBQ",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "sbqAgentsHub": [
+        {
+          "type": "webview",
+          "id": "sbqAgentsHub.chat",
+          "name": "SBQ Workspace"
+        }
+      ]
+    }
+  },
+  "files": [
+    "extension.js",
+    "media/**",
+    "README.md"
+  ]
+}
