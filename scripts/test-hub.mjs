@@ -25,7 +25,7 @@ try{
   let info;for(let i=0;i<70;i++){await sleep(100);try{info=JSON.parse(readFileSync(join(dir,'.sbq-agents-hub','daemon.json'),'utf8'));break;}catch{}}
   if(!info)throw Error('SBQ engine did not start');
   const api=async(method,path,body)=>{const r=await fetch(`http://127.0.0.1:${info.port}${path}`,{method,headers:{authorization:`Bearer ${info.token}`,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});return{status:r.status,data:await r.json()};};
-  if((await api('GET','/api/health')).data.version!=='0.5.0')throw Error('Version mismatch');
+  if((await api('GET','/api/health')).data.version!=='0.5.14')throw Error('Version mismatch');
   const providers=(await api('GET','/api/providers')).data.providers;
   if(!providers.some(p=>p.id==='freebuff'&&p.installed&&p.interactiveOnly))throw Error('Freebuff status not safe');
   if(!providers.some(p=>p.id==='kilo'&&p.installed))throw Error('Kilo missing');
@@ -35,8 +35,8 @@ try{
   if(saved.status!==200)throw Error('Save failed: '+JSON.stringify(saved));
   const started=await api('POST','/api/runs',{cwd:dir,task:'Mock implementation'});
   if(started.status!==202)throw Error('Run not accepted: '+JSON.stringify(started));
-  let run;for(let i=0;i<100;i++){await sleep(100);run=(await api('GET',`/api/runs/${started.data.run.id}`)).data.run;if(['completed','failed'].includes(run.status))break;}
-  if(run.status!=='completed'||!run.events.some(e=>e.text.includes('Kilo finished safely')))throw Error('Kilo runner failed: '+JSON.stringify(run));
-  console.log('PASS: free Kilo model discovery/refresh, Freebuff interactive safety, existing profiles and workflow run');
+  let run;for(let i=0;i<100;i++){await sleep(100);run=(await api('GET',`/api/runs/${started.data.run.id}`)).data.run;if(['completed','failed','needs-attention'].includes(run.status))break;}
+  if(run.status!=='needs-attention'||!run.events.some(e=>e.text.includes('ZERO project files')))throw Error('Kilo mock must not be marked successful without file changes: '+JSON.stringify(run));
+  console.log('PASS: free Kilo model discovery/refresh, Freebuff interactive safety, existing profiles and workflow no-op detection');
  }finally{child.kill('SIGTERM');}
 }finally{process.env.PATH=oldPath;rmSync(dir,{recursive:true,force:true});}

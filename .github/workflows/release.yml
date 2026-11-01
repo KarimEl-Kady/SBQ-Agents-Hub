@@ -31,11 +31,7 @@ jobs:
         run: npm run check
       - name: Linux integration tests
         if: runner.os == 'Linux'
-        run: |
-          npm run test:smoke
-          npm run test:integration
-          npm run test:sbq
-          npm run test:hub
+        run: npm run test:all
       - name: Package platform application
         run: npm run dist:${{ matrix.target }}
         env:

@@ -1,8 +1,8 @@
 {
   "name": "sbq-agents-hub",
   "displayName": "SBQ Agents Hub",
-  "description": "SBQ Agents Hub — multi-agent coding workspace",
-  "version": "0.5.1",
+  "description": "SBQ Agents Hub \u2014 multi-agent coding workspace",
+  "version": "0.5.13",
   "publisher": "sbq-local",
   "private": true,
   "engines": {

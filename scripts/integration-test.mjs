@@ -33,7 +33,7 @@ try{
  const models=await request('GET','/api/models?agent=opencode');if(!models.data.models.some(m=>m.id==='openai/gpt-demo'))throw Error('OpenCode model selection failed');
  const changes=await request('GET','/api/changes?cwd='+encodeURIComponent(repo));if(!changes.data.diff.includes('+export const foo = 2;'))throw Error('Git diff missing expected modification');
  const bad=await request('PUT','/api/workflow',{stages:[{id:'invalid',name:'bad',role:'review',agent:'claude',model:'Sonnet5.5',modelMode:'catalog',effort:'default',instructions:'test'}]});if(bad.status!==200)throw Error('Unexpected workflow validation failure');
- const badRun=await request('POST','/api/runs',{task:'check invalid model',cwd:repo});if(badRun.status!==400||!badRun.data.error.includes('not in'))throw Error('Saved unavailable model should have been rejected');
+ const badRun=await request('POST','/api/runs',{task:'check invalid model',cwd:repo});if(badRun.status!==400||!badRun.data.error.includes('model \"Sonnet5.5\"'))throw Error('Saved unavailable model should have been rejected');
  const runReq=await request('POST','/api/reviews',{cwd:repo,agent:'claude',model:'',modelMode:'default',effort:'default',instructions:'Check changed files'});if(runReq.status!==202)throw Error('Review endpoint failed '+JSON.stringify(runReq));
  let result;for(let i=0;i<100;i++){await wait(100);result=(await request('GET','/api/runs/'+runReq.data.run.id)).data.run;if(['completed','failed'].includes(result.status))break;}
  if(result?.status!=='completed'||!result.events.some(x=>x.text.includes('Reviewed:')))throw Error('AI review failed '+JSON.stringify(result));

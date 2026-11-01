@@ -25,7 +25,7 @@ try{
  let info;for(let i=0;i<45;i++){await sleep(100);try{info=JSON.parse(readFileSync(join(home,'.sbq-agents-hub','daemon.json'),'utf8'));break;}catch{}}
  if(!info)throw Error('Engine startup failed');
  const api=async(method,path,body)=>{const r=await fetch(`http://127.0.0.1:${info.port}${path}`,{method,headers:{authorization:`Bearer ${info.token}`,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});return{status:r.status,data:await r.json()}};
- const health=await api('GET','/api/health');if(health.data.version!=='0.5.0')throw Error('Incorrect engine version');
+ const health=await api('GET','/api/health');if(health.data.version!=='0.5.14')throw Error('Incorrect engine version');
  const providers=await api('GET','/api/providers');if(!providers.data.providers.some(p=>p.id==='gemini'&&p.auth==='unverified'))throw Error('Incorrect Gemini connection state');
  const save=await api('PUT','/api/workflow',{stages:[{id:'g',name:'Gemini plan',role:'plan',agent:'gemini',model:'',modelMode:'default',effort:'default',instructions:'Make a plan'}]});if(save.status!==200)throw Error('Gemini workflow not accepted');
  const created=await api('POST','/api/runs',{task:'Write a plan',cwd:home});if(created.status!==202)throw Error('Gemini run not accepted: '+JSON.stringify(created));

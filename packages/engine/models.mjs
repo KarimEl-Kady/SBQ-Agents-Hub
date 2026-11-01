@@ -45,6 +45,7 @@ async function codexModels() {
     catch{return resolve([]);}
     const write=obj=>{try{child.stdin.write(JSON.stringify(obj)+'\n');}catch{finish();}};
     const timer=setTimeout(()=>finish(),4500);
+    child.stdin.on('error',()=>finish()); // Codex may exit before initialize; EPIPE is not a crash.
     child.on('error',()=>finish());child.on('close',()=>finish());
     child.stdout.on('data',data=>{
       buffer+=data.toString();if(buffer.length>450_000)return finish();
@@ -58,6 +59,18 @@ async function codexModels() {
     });
     write({id:1,method:'initialize',params:{clientInfo:{name:'sbq-agents-hub',title:'SBQ Agents Hub',version:'0.5.0'}}});
   });
+}
+
+// Experimental, read-only Codex CLI fallback. App-server's model/list is the
+// preferred source; debug models helps when app-server is unsupported by an
+// installed Codex build. Neither response guarantees account entitlement.
+async function codexDebugModels(cwd){
+  const r=await run('codex',['debug','models'],{cwd,timeout:5500});
+  if(r.code!==0)return [];
+  let data;
+  try {data=JSON.parse(r.output);} catch {return [];}
+  const arr=Array.isArray(data)?data:Array.isArray(data.models)?data.models:Array.isArray(data.data)?data.data:[];
+  return arr.map(x=>({id:String(x.id||x.model||x.slug||''),label:String(x.displayName||x.display_name||x.name||x.id||x.slug||''),source:'cli-debug'})).filter(x=>validModelId(x.id)).slice(0,100);
 }
 
 export async function modelCatalog(agent,{cwd,refresh=false}={}){
@@ -115,6 +128,7 @@ export async function modelCatalog(agent,{cwd,refresh=false}={}){
   if(agent==='codex'){
     models=await codexModels();
     if(models.length){source='app-server';note='Catalog returned by Codex app-server. A model is verified only when an actual run succeeds.';}
+    else {models=await codexDebugModels(cwd);if(models.length){source='cli-debug';note='Read-only Codex debug catalog. This does not guarantee model access for your current subscription.';}}
   }
   const result={agent,source,note,models,checkedAt:new Date().toISOString(),supportsLiveCatalog:['codex','agy','opencode','kilo'].includes(agent)};cache.set(key,{time:Date.now(),result});return result;
 }
@@ -125,11 +139,18 @@ export async function validateStagesForRun(stages,{cwd}={}){
     if(!validAgent(s.agent)){errors.push(`Stage ${index+1}: unsupported agent`);continue;}
     if(s.modelMode==='default'||!s.model)continue;
     if(!validModelId(s.model)){errors.push(`Stage ${index+1} (${s.name}): invalid model ID "${s.model}"`);continue;}
-    if(s.modelMode==='custom')continue; // Explicit user override, actual access is checked by the provider.
+    if(s.modelMode==='custom')continue; // Explicit opt-in; never silently switch models.
     if(!catalogs.has(s.agent))catalogs.set(s.agent,await modelCatalog(s.agent,{cwd}));
-    const catalog=catalogs.get(s.agent);
+    let catalog=catalogs.get(s.agent);
     if(!catalog.models.some(m=>m.id===s.model)){
-      errors.push(`Stage ${index+1} (${s.name}): model "${s.model}" is not in ${s.agent}'s model picker. Select CLI default, refresh its models, or explicitly choose Custom model ID.`);
+      // Recheck the provider catalog once before rejecting a recently-added model.
+      // This is a read-only CLI operation and never consumes coding-model tokens.
+      catalog=await modelCatalog(s.agent,{cwd,refresh:true});catalogs.set(s.agent,catalog);
+    }
+    if(!catalog.models.some(m=>m.id===s.model)){
+      const sample=catalog.models.slice(0,5).map(m=>m.id).join(', ');
+      const reason=catalog.models.length?'is not currently listed by the CLI':'could not be verified (no readable CLI catalog)';
+      errors.push(`Stage ${index+1} (${s.name}): model "${s.model}" ${reason} for ${s.agent}. Open Workflows and choose CLI Default, or explicitly select Custom model ID to try this exact ID at your own risk. ${sample?'Models currently listed: '+sample+'. ':''}No model request was sent.`);
     }
   }
   return errors;

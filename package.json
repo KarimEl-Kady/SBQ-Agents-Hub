@@ -1,7 +1,7 @@
 {
   "name": "sbq-agents-hub",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.14",
   "description": "SBQ Agents Hub — local-first multi-agent coding workspace for Windows, macOS and Linux",
   "scripts": {
     "engine": "node packages/engine/server.mjs",
@@ -9,7 +9,7 @@
     "doctor:linux": "node scripts/linux-doctor.mjs",
     "sync:extension": "node scripts/sync-extension.mjs",
     "extension:package": "npm run sync:extension && cd apps/vscode && npx @vscode/vsce package",
-    "check": "node --check packages/engine/server.mjs && node --check packages/engine/models.mjs && node --check packages/engine/git.mjs && node --check apps/desktop/main.cjs && node --check apps/desktop/preload.cjs && node --check apps/vscode/extension.js && node --check packages/ui/app.js",
+    "check": "node --check packages/engine/project-readiness.mjs && node --check packages/engine/workspace.mjs && node --check packages/engine/server.mjs && node --check packages/engine/models.mjs && node --check packages/engine/git.mjs && node --check apps/desktop/main.cjs && node --check apps/desktop/preload.cjs && node --check apps/vscode/extension.js && node --check packages/ui/app.js",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:integration": "node scripts/integration-test.mjs",
     "test:sbq": "node scripts/test-sbq.mjs",
@@ -20,7 +20,20 @@
     "dist:win": "electron-builder --win nsis",
     "dist:mac": "electron-builder --mac dmg zip --x64 --arm64",
     "test:hub": "node scripts/test-hub.mjs",
-    "test:responsive": "node scripts/test-responsive.mjs"
+    "test:responsive": "node scripts/test-responsive.mjs",
+    "test:verification": "node scripts/test-verified-workflow.mjs",
+    "test:codex": "node scripts/test-codex-bridge.mjs",
+    "test:claude-plan": "node scripts/test-claude-planning.mjs",
+    "test:antigravity": "node scripts/test-antigravity-connection.mjs",
+    "test:permissions": "node scripts/test-permission-workflow.mjs",
+    "test:sandbox": "node scripts/test-codex-sandbox.mjs",
+    "test:model-recovery": "node scripts/test-model-recovery.mjs",
+    "test:orchestration": "node scripts/test-orchestration-contract.mjs",
+    "test:recovery": "node scripts/test-stage-recovery.mjs",
+    "test:gitless": "node scripts/test-gitless-changes.mjs",
+    "test:dependencies": "node scripts/test-project-readiness.mjs",
+    "test:all": "node scripts/run-all-tests.mjs",
+    "doctor:project": "node scripts/project-doctor.mjs"
   },
   "devDependencies": {
     "electron": "^33.4.11",
