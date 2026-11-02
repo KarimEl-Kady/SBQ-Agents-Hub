@@ -24,22 +24,24 @@
 
 The default workflow is only a template; every stage's agent, model, reasoning effort, instructions and ordering are configurable. `Plan → Implement → Review → Fix → Review` has offline regression coverage, but it has **not** yet been validated against the user's real authenticated provider CLIs and large repositories.
 
-## Linux testing, safe first run
-
-Unzip the complete source to a *new* directory, then inside `sbq-agents-hub`:
+## Linux setup on a new machine (Ubuntu 24.04+)
 
 ```bash
-npm install
-npm run check
-npm run test:orchestration
-npm run test:sandbox
-npm run doctor:linux
-npm run desktop
+npm install            # prints a setup hint if this machine still needs host fixes
+npm run doctor:linux   # full read-only check: Node, Electron sandbox, Codex sandbox, CLI sign-ins
+npm run desktop        # refuses to start (with the fix commands) if the Electron sandbox is not ready
 ```
 
-If Electron reports the Linux SUID sandbox-helper error, inspect the helper file and follow only the ownership/mode repair commands printed by `doctor:linux`; do not run the app as root. Electron's VSync warnings alone do not indicate a failed workflow.
+Ubuntu 24.04 and newer restrict unprivileged user namespaces, which breaks two things on a fresh machine. `doctor:linux` detects both and prints the exact commands. Review them, then run them yourself; SBQ never runs `sudo`:
 
-**Before running your real Coupon task:** open Connections and verify local sign-ins; set individual Stage models to `CLI default` initially, especially Codex; run **Test Codex (no tokens)**. With the Linux `bwrap`/AppArmor issue unresolved, SBQ blocks the entire workflow **before** the expensive Planning call. Fix the host sandbox or choose a working implementation agent; don't use dangerous broad bypass flags.
+- **Electron won't start** (SUID sandbox helper error): `sudo chown root:root node_modules/electron/dist/chrome-sandbox && sudo chmod 4755 node_modules/electron/dist/chrome-sandbox`. Repeat after every fresh `npm install`.
+- **Every Codex stage fails** (`bwrap: ... RTM_NEWADDR`): install `bubblewrap` and enable Ubuntu's shipped AppArmor profile: `sudo cp /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/ && sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict`.
+
+Do not run the app as root or with `--no-sandbox`. Electron's VSync warnings are harmless.
+
+**Package installs inside stages:** implementation and support stages may now run the project's own `npm install` / `npm ci` / `pnpm install` / `yarn install`. Codex gets network access inside its workspace sandbox and a private package cache in `~/.sbq-agents-hub/agent-cache/`, and Claude gets permission for exactly those install commands. Planning, review and release stages stay read-only and offline. Turn this off per stage in Workflows → stage → *Allow project package installs*. With it off, a project whose dependencies are not installed is blocked before planning, as before.
+
+**VS Code extension:** if neither the desktop app nor `npm run engine` is running, the extension starts its own bundled engine (created by `npm run sync:extension` / `npm run extension:package`).
 
 ## Automated tests
 

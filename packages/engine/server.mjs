@@ -1,10 +1,10 @@
 import http from 'node:http';
-import { spawn as nativeSpawn } from 'node:child_process';
+import { spawn as nativeSpawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 let spawn = nativeSpawn;
 try { spawn = require('cross-spawn'); } catch { /* npm install supplies cross-spawn; built-in spawn works for native executable paths */ }
-import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, chmodSync, copyFileSync, lstatSync, readdirSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, chmodSync, copyFileSync, lstatSync, readdirSync, renameSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,18 +17,24 @@ import { checkProjectDependencies } from './project-readiness.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const DATA = join(homedir(), '.sbq-agents-hub');
 const LEGACY_DATA = join(homedir(), '.agentflow');
-const ENGINE_VERSION = '0.5.14';
+// Single source of truth: the nearest package.json (repo root, or the VS Code
+// extension's own package.json for the bundled engine copy).
+const ENGINE_VERSION = (()=>{const here=dirname(fileURLToPath(import.meta.url));for(const file of [join(ROOT,'package.json'),join(here,'..','package.json')]){try{const p=JSON.parse(readFileSync(file,'utf8'));if(p.name==='sbq-agents-hub'&&p.version)return p.version;}catch{}}return '0.0.0';})();
 const DAEMON_INFO = join(DATA, 'daemon.json');
 const WORKFLOW_PATH = join(DATA, 'workflow.json');
 const AGY_CONNECTION_PATH = join(DATA, 'antigravity-connection.json');
 const ARTIFACT_DIR = join(DATA, 'run-artifacts');
 const RUN_DIR = join(DATA, 'runs');
+// Package-manager caches for sandboxed agents. Kept outside the project (so they
+// never show up as code changes) and outside the user's real ~/.npm or pnpm store.
+const AGENT_CACHE_DIR = join(DATA, 'agent-cache');
 // Preserve enough architect context for implementers and each FIX iteration.
 const MAX_CONTEXT_CHARS = 64000;
 const RUNNABLE_AGENTS = ['claude', 'codex', 'agy', 'opencode', 'gemini', 'kilo'];
 const CLI_NAMES = [...RUNNABLE_AGENTS,'freebuff'];
 // Opt-in only. Each rule is an exact non-shell CLI command, never an entire Bash tool grant.
-const PREAPPROVED_CHECKS = new Set(['php artisan test','vendor/bin/pint','vendor/bin/pint --test','npm test','npm run test','npm run lint','npm run build','composer test','dotnet test','pytest']);
+const INSTALL_COMMANDS = ['npm install','npm ci','pnpm install','yarn install','bun install'];
+const PREAPPROVED_CHECKS = new Set(['php artisan test','vendor/bin/pint','vendor/bin/pint --test','npm test','npm run test','npm run lint','npm run build','composer test','dotnet test','pytest',...INSTALL_COMMANDS]);
 const DEFAULT_WORKFLOW = [
   { id:'plan',name:'Planning',role:'plan',agent:'claude',model:'',modelMode:'default',effort:'default',instructions:'Inspect the repository, write a concrete implementation plan and testable acceptance criteria. Do not change files.' },
   { id:'build',name:'Implementation',role:'implement',agent:'codex',model:'',modelMode:'default',effort:'default',instructions:'Implement the requested code in the selected project. Add or update tests. Your output is not considered success without actual workspace changes.',requireChanges:true },
@@ -37,6 +43,36 @@ const DEFAULT_WORKFLOW = [
   { id:'final-review',name:'Final Review',role:'review',agent:'claude',model:'',modelMode:'default',effort:'default',instructions:'Verify every original requirement, required tests, documentation and supporting changes. Return FIX if any requirement is unverified.',reviewLoop:true,returnTo:'support',maxRetries:1 },
   { id:'release',name:'Release Preparation',role:'release',agent:'opencode',model:'',modelMode:'default',effort:'default',instructions:'Prepare a release checklist and recommended commit message. Do not commit, push, or deploy without explicit user approval.',requireChanges:false }
 ];
+// Apps started from a desktop menu, Dock or the VS Code extension host often get
+// a minimal PATH, so installed CLIs look "not installed". Merge the user's login
+// shell PATH plus common per-user install folders. Never reads credentials.
+const MARK='__SBQ_PATH__';
+function loginShellPath(){
+ if(process.platform==='win32'||!process.env.SHELL)return [];
+ try{
+  const r=spawnSync(process.env.SHELL,['-ilc',`printf '${MARK}%s${MARK}' "$PATH"`],{encoding:'utf8',timeout:4000,stdio:['ignore','pipe','ignore']});
+  const m=String(r.stdout||'').match(new RegExp(MARK+'(.*?)'+MARK,'s'));
+  return m?m[1].split(':').filter(Boolean):[];
+ }catch{return [];}
+}
+function versionKey(v){return String(v).replace(/^v/,'').split('.').map(n=>Number.parseInt(n,10)||0);}
+export function includeCommonCliPaths(){
+ if(process.env.SBQ_SKIP_PATH_DISCOVERY==='1')return;
+ const h=homedir(),delim=process.platform==='win32'?';':':';
+ const candidates=[
+  join(h,'.local','bin'),join(h,'bin'),join(h,'.opencode','bin'),join(h,'.bun','bin'),
+  join(h,'.volta','bin'),join(h,'.npm-global','bin'),join(h,'.local','share','pnpm'),join(h,'.yarn','bin'),
+  join(h,'.deno','bin'),join(h,'.cargo','bin'),'/opt/homebrew/bin','/usr/local/bin','/snap/bin'
+ ];
+ if(process.platform==='win32'&&process.env.APPDATA)candidates.push(join(process.env.APPDATA,'npm'));
+ const nvm=join(h,'.nvm','versions','node');
+ if(existsSync(nvm))try{
+  const versions=readdirSync(nvm).sort((a,b)=>{const x=versionKey(a),y=versionKey(b);for(let i=0;i<3;i++)if(x[i]!==y[i])return y[i]-x[i];return 0;});
+  for(const v of versions.slice(0,5))candidates.push(join(nvm,v,'bin'));
+ }catch{}
+ const original=String(process.env.PATH||'').split(delim).filter(Boolean);
+ process.env.PATH=[...new Set([...original,...loginShellPath(),...candidates.filter(x=>existsSync(x))])].join(delim);
+}
 function ensureData(){ mkdirSync(DATA, {recursive:true,mode:0o700}); const old=join(LEGACY_DATA,'workflow.json');if(!existsSync(WORKFLOW_PATH)&&existsSync(old))try{copyFileSync(old,WORKFLOW_PATH);if(process.platform!=='win32')chmodSync(WORKFLOW_PATH,0o600);}catch{}}
 function readWorkflow(){ ensureData(); try{const v=JSON.parse(readFileSync(WORKFLOW_PATH,'utf8'));return Array.isArray(v)&&v.length?v.map(s=>({...s,modelMode:s.modelMode||(s.model?'catalog':'default')})):DEFAULT_WORKFLOW;}catch{return DEFAULT_WORKFLOW;} }
 function saveWorkflow(stages){
@@ -54,6 +90,7 @@ function saveWorkflow(stages){
    requireChanges:typeof s.requireChanges==='boolean'?s.requireChanges:['implement','support'].includes(role),
    verifyCommand:String(s.verifyCommand||'').trim().slice(0,200),
    requiresDocker:s.requiresDocker===true,
+   allowNetwork:['implement','support'].includes(role)?s.allowNetwork!==false:false,
    allowedCommands:[...new Set(Array.isArray(s.allowedCommands)?s.allowedCommands:[])].filter(x=>PREAPPROVED_CHECKS.has(x)).slice(0,10),
    reviewLoop:role==='review'&&s.reviewLoop===true,
    returnTo:String(s.returnTo||''),maxRetries:Math.min(5,Math.max(0,Number(s.maxRetries)||0))};
@@ -66,7 +103,7 @@ function saveWorkflow(stages){
 }
 // Always close child stdin. A dangling pipe causes some Codex releases to wait at
 // "Reading additional input from stdin..." until our 15-minute deadline.
-function runProcess(executable,args,{cwd,timeout=5000,onLine,onStderr,signal,input}={}){
+function runProcess(executable,args,{cwd,timeout=5000,onLine,onStderr,signal,input,env}={}){
  return new Promise((resolveResult)=>{
   let child,output='',stderr='',settled=false,timedOut=false,timeoutTimer,killTimer;
   let stdoutBuffer='',stderrBuffer='';
@@ -77,7 +114,7 @@ function runProcess(executable,args,{cwd,timeout=5000,onLine,onStderr,signal,inp
   };
   if(signal?.aborted)return finish({exitCode:130,signal:'ABORTED'});
   try{
-   child=spawn(executable,args,{cwd,shell:false,windowsHide:true,env:process.env,signal,stdio:['pipe','pipe','pipe']});
+   child=spawn(executable,args,{cwd,shell:false,windowsHide:true,env:env?{...process.env,...env}:process.env,signal,stdio:['pipe','pipe','pipe']});
   }catch(error){stderr=String(error);return finish({exitCode:127,missing:true});}
   // Codex uses `codex exec -` to read the prompt from stdin; other CLIs must
   // receive EOF immediately so they never pause asking for more input.
@@ -190,6 +227,14 @@ function countOpenCodeAccounts(raw){
   return accounts.filter(Boolean).length;
  }catch{return 0;}
 }
+// `opencode auth list` prints one "●  <Provider> <type>" line per credential and
+// a "└  N credentials" footer. Any provider counts (DeepSeek, Moonshot, ...).
+export function parseOpenCodeAuthList(text){
+ const clean=String(text||'').replace(/\x1b\[[0-9;]*m/g,'');
+ const footer=clean.match(/(\d+)\s+credentials?\b/i);
+ if(footer)return Number(footer[1]);
+ return clean.split(/\r?\n/).filter(x=>/^\s*[●•✓✔]\s+\S/.test(x)).length;
+}
 async function checkProvider(id){
  const version=await runProcess(id,['--version'],{timeout:3500});
  if(version.missing||version.exitCode===127)return{id,installed:false,auth:'not-installed',detail:'CLI not found in the application PATH. Existing IDE sign-in can be reused when a compatible CLI is installed.'};
@@ -207,10 +252,7 @@ async function checkProvider(id){
   // Older OpenCode installations expose a plain-text account list instead of --format json.
   // Only infer connection when a recognizable provider line is present; never read credential files.
   if(count===0){const older=await runProcess('opencode',['auth','list'],{timeout:5500});
-   if(older.exitCode===0){const clean=older.output.replace(/\x1b\[[0-9;]*m/g,'');
-    const lines=clean.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-    count=lines.filter(x=>/^([●•✓✔]\s*|[-*]\s*)?(openai|anthropic|claude-agent|github-copilot|google|opencode|openrouter|xai|azure|amazon-bedrock)\b/i.test(x)).length;
-   }
+   if(older.exitCode===0)count=parseOpenCodeAuthList(older.output);
   }
   return {id,installed:true,auth:count>0?'connected':'unverified',authSource:'opencode-local-service',accountCount:count,
    detail:count>0?`${count} existing OpenCode connection(s) recognized from the CLI / local app. No credentials were copied.`:'OpenCode Desktop, IDE extension and CLI can use the same local OpenCode service. Click Recheck existing session. To add ChatGPT / Claude Agent without an API key, select the browser or CLI login method in OpenCode.'};
@@ -232,7 +274,10 @@ async function workflowReadiness(stages,cwd){
  // Only inspect files, never install dependencies, run package scripts or access a model.
  if(stages.some(s=>['implement','support'].includes(s.role))){
   const deps=checkProjectDependencies(cwd);
-  if(['blocked','invalid'].includes(deps.status))errors.push(`Project dependency preflight: ${deps.detail} Missing: ${(deps.missing||[]).slice(0,5).map(d=>d.dependency).join(', ')}`);
+  // A fresh clone has no node_modules. That is only a blocker when no writable
+  // stage is allowed to run the install itself.
+  const installer=stages.some(stageAllowsInstalls);
+  if(deps.status==='invalid'||(deps.status==='blocked'&&!installer))errors.push(`Project dependency preflight: ${deps.detail} Missing: ${(deps.missing||[]).slice(0,5).map(d=>d.dependency).join(', ')}`);
  }
  for(const [i,s] of stages.entries()){
   if(checked.has(s.agent))continue;checked.add(s.agent);
@@ -263,6 +308,30 @@ function schedulePersist(run){
  const timer=setTimeout(()=>{saveTimers.delete(run.id);persistRun(run);},250);
  timer.unref?.();saveTimers.set(run.id,timer);
 }
+// Enough state to restart one stage after the engine stops (app closed, crash,
+// reboot). Saved with the run history; retry still needs explicit user consent.
+function resumeState(state){return{stages:state.stages,startIndex:state.startIndex,previous:String(state.previous||'').slice(-MAX_CONTEXT_CHARS),attempts:[...(state.attempts||new Map())],completedEdits:state.completedEdits||0,partialEdits:state.partialEdits||0,partialFiles:(state.partialFiles||[]).slice(0,100)};}
+function continuationFromResume(r){return{...r,attempts:new Map(Array.isArray(r.attempts)?r.attempts:[])};}
+function restoreAfterRestart(run){
+ const r=run.resume,stage=Array.isArray(r?.stages)?r.stages[r.startIndex]:null;
+ if(!stage)return false;
+ if(run.status==='needs-input'&&run.pendingInput){
+  continuations.set(run.id,continuationFromResume(r));
+  run.events.push({id:randomUUID(),type:'system',text:'SBQ restarted. Your planning answers can still continue this run; planning will not be repeated.',ts:Date.now()});
+  return true;
+ }
+ const last=run.stageResults.at(-1);if(last&&['running','awaiting-approval'].includes(last.status))last.status='interrupted';
+ run.pendingApproval=null;run.pendingInput=null;
+ run.pendingRecovery=run.pendingRecovery||{stageId:stage.id,stageName:stage.name,agent:stage.agent,code:'INTERRUPTED',
+  title:'SBQ closed while this stage was running',
+  detail:'Earlier completed stages and the architect plan are kept. Check the project files, then retry only this stage.',
+  changedFiles:(r.partialFiles||[]).slice(0,100),attempts:run.recoveryAttempts?.[stage.id]||0,maxAttempts:2,
+  warning:'Retry makes a NEW agent request and may consume tokens. Previously completed stages will not be re-run.'};
+ run.status='needs-attention';
+ continuations.set(run.id,{...continuationFromResume(r),recovery:true});
+ run.events.push({id:randomUUID(),type:'warning',text:`SBQ restarted while "${stage.name}" was unfinished. Completed stages are kept; you can retry only this stage.`,ts:Date.now(),stageId:stage.id});
+ return true;
+}
 function loadPreviousRuns(){
  mkdirSync(RUN_DIR,{recursive:true,mode:0o700});
  const names=readdirSync(RUN_DIR).filter(name=>/^[a-f0-9-]{36}\.json$/.test(name)).slice(-80);
@@ -270,6 +339,7 @@ function loadPreviousRuns(){
   const run=JSON.parse(readFileSync(join(RUN_DIR,name),'utf8'));
   if(!run||run.id+'.json'!==name||typeof run.cwd!=='string'||!Array.isArray(run.events)||!Array.isArray(run.stageResults))continue;
   if(['running','queued','needs-approval','needs-input'].includes(run.status)||run.pendingRecovery){
+   if(restoreAfterRestart(run)){persistRun(run);runs.set(run.id,run);continue;}
    run.status='interrupted';run.pendingApproval=null;run.pendingInput=null;run.pendingRecovery=null;
    run.events.push({id:randomUUID(),type:'warning',text:'The previous engine session ended. The run and stage outputs are preserved, but this CLI session cannot be safely resumed automatically. Review repository changes before starting a new run.',ts:Date.now()});
    persistRun(run);
@@ -313,13 +383,18 @@ function compactEvent(line,agent){let o;try{o=JSON.parse(line);}catch{return nul
 }
 // The requested role determines permissions, not the runner name. Never put an
 // implementation/support agent into read-only planning mode.
-export function makeCommand(s,prompt,{isGitRepo=true,cwd,allowedTools=[],resumeSessionId=null}={}){
+// Writable stages may install project packages unless the stage opts out.
+// Read-only roles (plan/review/release) never get network or extra write access.
+export function stageAllowsInstalls(s){return ['implement','support'].includes(s.role)&&s.allowNetwork!==false;}
+export function makeCommand(s,prompt,{isGitRepo=true,cwd,allowedTools=[],resumeSessionId=null,cacheDir=AGENT_CACHE_DIR}={}){
  const model=s.modelMode==='default'?'':s.model?.trim(), effort=s.effort;
  const writable=['implement','support'].includes(s.role);
+ const installs=stageAllowsInstalls(s);
  if(s.agent==='claude'){
   const args=['-p',prompt,'--output-format','stream-json','--verbose','--permission-mode',writable?'acceptEdits':'plan'];
   if(resumeSessionId)args.push('--resume',resumeSessionId);
-  if(allowedTools.length)args.push('--allowedTools',...allowedTools);
+  const tools=[...new Set([...allowedTools,...(installs?INSTALL_COMMANDS.map(c=>`Bash(${c})`):[])])];
+  if(tools.length)args.push('--allowedTools',...tools);
   if(model)args.push('--model',model);
   if(effort&&effort!=='default')args.push('--effort',effort);
   return ['claude',args];
@@ -328,11 +403,24 @@ export function makeCommand(s,prompt,{isGitRepo=true,cwd,allowedTools=[],resumeS
   const args=['exec','--json','--sandbox',writable?'workspace-write':'read-only'];
   if(!isGitRepo)args.push('--skip-git-repo-check');
   if(cwd)args.push('--cd',cwd);
+  let env;
+  if(installs){
+   // workspace-write blocks the network and every folder outside the project by
+   // default, so `npm install` failed with EAI_AGAIN and unwritable ~/.npm logs.
+   // Allow the network and point package caches at one private SBQ folder.
+   args.push('-c','sandbox_workspace_write.network_access=true','--add-dir',cacheDir);
+   // Each tool reads its own variable names (pnpm 11 ignores npm_config_*).
+   // XDG_CACHE_HOME covers tools that cache under ~/.cache (Prisma engines,
+   // node-gyp, Playwright); corepack then keeps pnpm/yarn in the same folder.
+   env={npm_config_cache:join(cacheDir,'npm'),pnpm_config_store_dir:join(cacheDir,'pnpm-store'),pnpm_config_cache_dir:join(cacheDir,'pnpm-cache'),
+    YARN_CACHE_FOLDER:join(cacheDir,'yarn'),BUN_INSTALL_CACHE_DIR:join(cacheDir,'bun'),XDG_CACHE_HOME:join(cacheDir,'xdg-cache'),
+    COREPACK_HOME:join(cacheDir,'corepack'),COREPACK_ENABLE_DOWNLOAD_PROMPT:'0'};
+  }
   if(model)args.push('--model',model);
   if(effort&&effort!=='default')args.push('-c',`model_reasoning_effort=${effort}`);
   // Force explicit stdin-input mode; passing a positional prompt can make some
   // CLI versions wait indefinitely for additional stdin in an Electron process.
-  args.push('-');return ['codex',args,{input:prompt}];
+  args.push('-');return ['codex',args,{input:prompt,env}];
  }
  if(s.agent==='agy'){
   const args=['-p',prompt,'--output-format','stream-json','--mode',writable?'accept-edits':'plan'];
@@ -433,7 +521,7 @@ function isWithinWorkspace(file,cwd){
  while(current!==base){if(existsSync(current)){try{if(lstatSync(current).isSymbolicLink())return false;}catch{return false;}}current=dirname(current);}
  return true;
 }
-const SAFE_COMMAND=/^(?:php artisan test(?:\s+--(?:filter|testsuite|group)\s*[= ]\s*[A-Za-z0-9_\\-]+)?|vendor\/bin\/pint(?:\s+--test)?|npm test|npm run (?:test|lint|build)|composer test|dotnet test|pytest)(?:\s*)$/;
+const SAFE_COMMAND=/^(?:php artisan test(?:\s+--(?:filter|testsuite|group)\s*[= ]\s*[A-Za-z0-9_\\-]+)?|vendor\/bin\/pint(?:\s+--test)?|npm test|npm run (?:test|lint|build)|composer test|dotnet test|pytest|npm (?:install|ci)|pnpm install|yarn install|bun install)(?:\s*)$/;
 export function suggestedToolPermission(request,cwd){
  const {tool,command,path}=request;
  if(tool==='Bash'){
@@ -475,6 +563,33 @@ export function contextualExcerpt(value,max=MAX_CONTEXT_CHARS){
 
 // Ask for missing business decisions explicitly, instead of proceeding on
 // invented assumptions or treating a complete planning response as a failure.
+// In plan mode Claude Code often saves the full plan to ~/.claude/plans/<name>.md
+// and replies with a short summary. Hand the full file to later stages instead.
+// Only files inside that folder, written during this stage, are read.
+export function claudePlanFromOutput(text,{home=homedir(),since=0}={}){
+ const dir=join(home,'.claude','plans');
+ const candidates=[...String(text||'').matchAll(/(?:~|\/)[^\s`'"()<>]*?\.claude\/plans\/[^\s`'"()<>]+?\.md\b/g)].map(m=>m[0].replace(/^~/,home));
+ for(const candidate of candidates.reverse()){
+  try{
+   const file=resolve(candidate);
+   if(dirname(file)!==dir)continue;
+   const real=realpathSync(file);if(dirname(real)!==realpathSync(dir))continue;
+   const info=statSync(real);
+   if(!info.isFile()||info.size>400000||info.mtimeMs<since-2000)continue;
+   const content=readFileSync(real,'utf8');
+   if(content.trim())return content;
+  }catch{}
+ }
+ return null;
+}
+// Instructions for a writable stage when the project's packages are missing.
+export function dependencySetupHint(deps){
+ const pm=deps.manager||'npm';
+ return [`PROJECT DEPENDENCIES ARE NOT INSTALLED (${deps.missingCount||'some'} missing). Run \`${deps.installHint}\` in the project directory before building or testing.`,
+  `This project uses ${pm}. Do not mix package managers: never run another manager's install here and never add another manager's lockfile.`,
+  pm==='pnpm'?'If pnpm reports ERR_PNPM_IGNORED_BUILDS, set only the packages this project really needs (for example prisma, @prisma/engines, esbuild) to true under allowBuilds in pnpm-workspace.yaml (pnpm 11; onlyBuiltDependencies on pnpm 10), rerun the install and mention it in your report.':'',
+  'Package and tool caches (~/.cache) are redirected to a writable SBQ folder. Never use sudo or global installs.'].filter(Boolean).join(' ');
+}
 export function planningQuestions(text){
  const answer=String(text||'');
  const match=answer.match(/(?:\*\*)?Questions for you\s*:\s*(?:\*\*)?/i);
@@ -530,6 +645,7 @@ function pauseForRecovery(run,stage,stageIndex,stages,state,blocker,output,obser
   partialFiles:observedFiles.slice(0,100),
   previous:[state.previous,`BLOCKED STAGE OUTPUT (not complete):\n${contextualExcerpt(output,16000)}`].filter(Boolean).join('\n\n'),
   recovery:true});
+ run.resume=resumeState(continuations.get(run.id));
  emit(run,'warning',`${stage.name}: ${blocker.title}. ${observedFiles.length} changed file(s) retained as PARTIAL work; no following stages will run. Review the work, fix the environment and explicitly retry this stage.`,{stageId:stage.id,agent:stage.agent,code:blocker.code});
 }
 async function executeWorkflow(run,stages,signal,{startIndex=0,previous='',attempts=new Map(),completedEdits=0,approvedTools=[],resumeSessionId=null,permissionRetries=0,partialEdits=0,partialFiles=[],recovery=false}={}){
@@ -540,6 +656,7 @@ async function executeWorkflow(run,stages,signal,{startIndex=0,previous='',attem
   const s=stages[i];run.stageIndex=i;
   const stageRecord={id:s.id,name:s.name,role:s.role,agent:s.agent,status:'running',changedFiles:[],checks:[],attempt:permissionRetries+1};
   run.stageResults.push(stageRecord);
+  run.resume=resumeState({stages,startIndex:i,previous,attempts,completedEdits,partialEdits,partialFiles});
   emit(run,'stage',`Starting ${s.name} (${s.role})`,{agent:s.agent,model:s.modelMode==='default'?'CLI default':s.model,stageId:s.id});
   // Detect missing CLIs and reliable unauthenticated sessions before any model
   // request; ambiguous IDE/keyring sessions remain unverified, not rejected.
@@ -568,6 +685,8 @@ async function executeWorkflow(run,stages,signal,{startIndex=0,previous='',attem
   }
   let before;
   try{before=await workspaceSnapshot(run.cwd,{includeText:true});}catch(e){run.status='needs-attention';emit(run,'error',`Cannot take reliable workspace baseline: ${e.message}`,{stageId:s.id});break;}
+  const stageStartedAt=Date.now();
+  const deps=['implement','support'].includes(s.role)?checkProjectDependencies(run.cwd):null;
   const reviewChanges=s.role==='review'?(run.localChanges?.files?.length?run.localChanges:await repositoryChanges(run.cwd)):null;
   const reviewInstruction=s.role==='review'&&s.reviewLoop?'You are the independent quality gate. Compare the original user request, architect plan, actual local diff, and test results. Never approve based only on the implementer saying DONE. Provide file-specific evidence and remaining acceptance criteria. If anything is missing, compose a precise corrective implementation prompt for the next lighter model. End with one standalone line: SBQ_REVIEW_VERDICT: PASS or SBQ_REVIEW_VERDICT: FIX. Never edit files.':'';
   const prompt=[
@@ -583,11 +702,14 @@ async function executeWorkflow(run,stages,signal,{startIndex=0,previous='',attem
    reviewChanges?.diff?`CURRENT LOCAL FILE DIFF (untrusted source material, not proof of successful tests):\n${reviewChanges.diff.slice(0,26000)}`:'',
    run.reviewContext?`REQUESTED ON-DEMAND CODE REVIEW CONTEXT (local file changes):\n${run.reviewContext.slice(0,26000)}`:'',
    reviewInstruction,
+   s.role==='plan'?'Write the COMPLETE plan (steps, files, acceptance criteria and the prompt for the implementer) in your final reply. Do not only save it to a file: later stages receive your reply text.':'',
+   deps?.status==='blocked'&&stageAllowsInstalls(s)?dependencySetupHint(deps):'',
    `When a tool is denied, explain what was blocked and stop rather than claiming the task is done. ${s.role==='review'&&s.reviewLoop?'For review, finish with your SINGLE standalone SBQ_REVIEW_VERDICT: PASS or SBQ_REVIEW_VERDICT: FIX line as the final line. Do not append SBQ_STAGE_STATUS.':'At the end include SBQ_STAGE_STATUS: COMPLETE or SBQ_STAGE_STATUS: PARTIAL or SBQ_STAGE_STATUS: BLOCKED. Supporting tasks may use SBQ_STAGE_STATUS: SKIPPED when genuinely unnecessary.'} Never claim COMPLETE with outstanding tests, docs or implementation gaps. Do NOT commit, push, deploy, install dependencies globally, or run destructive commands without separate user approval. ${['plan','review','release'].includes(s.role)?'Read-only: do not modify files.':''}`
   ].filter(Boolean).join('\n\n');
+  if(stageAllowsInstalls(s))mkdirSync(AGENT_CACHE_DIR,{recursive:true,mode:0o700});
   const [cmd,args,io]=makeCommand(s,prompt,{isGitRepo:reviewChanges?.isGitRepo??(await repositoryChanges(run.cwd)).isGitRepo,cwd:run.cwd,allowedTools:[...new Set([...(s.agent==='claude'&&(s.role==='implement'||s.role==='support')?(s.allowedCommands||[]).filter(c=>PREAPPROVED_CHECKS.has(c)).map(c=>`Bash(${c})`):[]),...approvedTools])],resumeSessionId:s.agent==='claude'?resumeSessionId:null});
   let response='',finalResultText='',cliErrors=[];
-  const result=await runProcess(cmd,args,{cwd:run.cwd,timeout:15*60*1000,signal,input:io?.input,
+  const result=await runProcess(cmd,args,{cwd:run.cwd,timeout:15*60*1000,signal,input:io?.input,env:io?.env,
    onStderr:line=>{if(!line.trim())return;cliErrors.push(line);if(cliErrors.length>30)cliErrors.shift();emit(run,'output',`CLI stderr: ${line.slice(0,900)}`,{agent:s.agent,stageId:s.id});},
    onLine:line=>{
     const event=compactEvent(line,s.agent);
@@ -701,7 +823,12 @@ async function executeWorkflow(run,stages,signal,{startIndex=0,previous='',attem
    stageRecord.status='partial';run.status='needs-attention';
    emit(run,'warning',`${s.name} reported remaining work. ${evidence.changedCount} file(s) changed, but completion is NOT verified. Review its outstanding tasks before restarting.`,{stageId:s.id});break;
   }
-  previous=contextualExcerpt(output,MAX_CONTEXT_CHARS);
+  const planFile=s.role==='plan'&&s.agent==='claude'?claudePlanFromOutput(output,{since:stageStartedAt}):null;
+  if(planFile){
+   storeStageArtifact(run,stageRecord,planFile+'\n\n---\nPlanner summary:\n'+output);
+   emit(run,'system',`${s.name}: Claude saved the full plan to a file; using its ${planFile.length.toLocaleString()} characters instead of the short summary.`,{stageId:s.id});
+  }
+  previous=contextualExcerpt(planFile?planFile+'\n\n'+output:output,MAX_CONTEXT_CHARS);
   if(s.role==='plan'){
    run.architectPlan=previous;
    emit(run,'artifact',`Architect plan captured (${output.length.toLocaleString()} characters) for the implementer and all review/fix retries.`,{stageId:s.id,artifact:stageRecord.artifact});
@@ -710,6 +837,7 @@ async function executeWorkflow(run,stages,signal,{startIndex=0,previous='',attem
     stageRecord.status='awaiting-input';run.status='needs-input';
     run.pendingInput={stageId:s.id,questions};
     continuations.set(run.id,{stages,startIndex:i+1,previous,attempts:new Map(attempts),completedEdits});
+    run.resume=resumeState(continuations.get(run.id));
     emit(run,'question',`Planning completed successfully, but needs your decisions before implementation.\n\n${questions.slice(0,1800)}`,{agent:s.agent,stageId:s.id});
     break;
    }
@@ -754,7 +882,7 @@ function isBusy(cwd,excludeRunId=null){return [...runs.values()].some(x=>x.cwd==
 function send(res,code,body){const payload=JSON.stringify(body);res.writeHead(code,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','content-length':Buffer.byteLength(payload)});res.end(payload);}
 async function readBody(req){let text='';for await(const c of req){text+=c;if(text.length>1_000_000)throw new Error('Request too large');}return text?JSON.parse(text):{};}
 function authHeader(req,token){const val=String(req.headers.authorization||'').replace(/^Bearer\s+/i,'');const a=Buffer.from(val),b=Buffer.from(token);return a.length===b.length&&timingSafeEqual(a,b);}
-export async function startEngine({port=0}={}){ensureData();loadPreviousRuns();const token=randomBytes(32).toString('hex');const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url,'http://127.0.0.1');if(!authHeader(req,token))return send(res,401,{error:'Unauthorized'});if(req.method==='GET'&&url.pathname==='/api/health')return send(res,200,{ok:true,version:ENGINE_VERSION});if(req.method==='GET'&&url.pathname==='/api/project-readiness'){const cwd=url.searchParams.get('cwd');if(!cwd||!existsSync(cwd)||!statSync(cwd).isDirectory())return send(res,400,{error:'Choose an existing local project directory'});return send(res,200,checkProjectDependencies(cwd));}if(req.method==='GET'&&url.pathname==='/api/diagnostics'){const agent=url.searchParams.get('agent')||'codex';if(!RUNNABLE_AGENTS.includes(agent))return send(res,400,{error:'Unknown agent'});const status=await checkProvider(agent);const version=status.installed?await runProcess(agent,['--version'],{timeout:5000}):null;const sandbox=agent==='codex'&&status.installed?await codexSandboxPreflight():null;return send(res,200,{agent,installed:status.installed,auth:status.auth,version:version?.output.trim().slice(0,200)||'unavailable',detail:status.detail,sandbox,advice:agent==='codex'?(sandbox?.status==='blocked'?sandbox.detail:'Codex uses workspace-write for implementation and closes stdin. CLI default model helps isolate model-access errors. Sandbox status: '+(sandbox?.status||'not-installed')+'. No model tokens used.'):'Verify your official CLI sign-in and writable project permissions. No paid model call was made.'});}if(req.method==='GET'&&url.pathname==='/api/preflight'){
+export async function startEngine({port=0}={}){includeCommonCliPaths();ensureData();loadPreviousRuns();const token=randomBytes(32).toString('hex');const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url,'http://127.0.0.1');if(!authHeader(req,token))return send(res,401,{error:'Unauthorized'});if(req.method==='GET'&&url.pathname==='/api/health')return send(res,200,{ok:true,version:ENGINE_VERSION});if(req.method==='GET'&&url.pathname==='/api/project-readiness'){const cwd=url.searchParams.get('cwd');if(!cwd||!existsSync(cwd)||!statSync(cwd).isDirectory())return send(res,400,{error:'Choose an existing local project directory'});return send(res,200,checkProjectDependencies(cwd));}if(req.method==='GET'&&url.pathname==='/api/diagnostics'){const agent=url.searchParams.get('agent')||'codex';if(!RUNNABLE_AGENTS.includes(agent))return send(res,400,{error:'Unknown agent'});const status=await checkProvider(agent);const version=status.installed?await runProcess(agent,['--version'],{timeout:5000}):null;const sandbox=agent==='codex'&&status.installed?await codexSandboxPreflight():null;return send(res,200,{agent,installed:status.installed,auth:status.auth,version:version?.output.trim().slice(0,200)||'unavailable',detail:status.detail,sandbox,advice:agent==='codex'?(sandbox?.status==='blocked'?sandbox.detail:'Codex uses workspace-write for implementation and closes stdin. CLI default model helps isolate model-access errors. Sandbox status: '+(sandbox?.status||'not-installed')+'. No model tokens used.'):'Verify your official CLI sign-in and writable project permissions. No paid model call was made.'});}if(req.method==='GET'&&url.pathname==='/api/preflight'){
  const stages=readWorkflow(),checks=[];const seen=new Set();const cwd=url.searchParams.get('cwd')||undefined;
  for(const stage of stages){
   if(seen.has(stage.agent))continue;seen.add(stage.agent);
@@ -771,7 +899,9 @@ export async function startEngine({port=0}={}){ensureData();loadPreviousRuns();c
  if(stages.some(s=>s.requiresDocker)){const d=await dockerDaemonPreflight();checks.push({agent:'docker',label:'Docker daemon',status:d.status,detail:d.detail});}
  if(cwd&&existsSync(cwd)&&statSync(cwd).isDirectory()&&stages.some(s=>['implement','support'].includes(s.role))){
   const deps=checkProjectDependencies(cwd);
-  checks.push({agent:'project-dependencies',label:'Project dependencies',status:deps.status,detail:deps.detail,missingCount:deps.missingCount||0});
+  const installer=stages.find(stageAllowsInstalls);
+  const canInstall=deps.status==='blocked'&&installer;
+  checks.push({agent:'project-dependencies',label:'Project dependencies',status:canInstall?'warning':deps.status,detail:canInstall?`${deps.missingCount} package(s) not installed yet. The "${installer.name}" stage is allowed to run \`${deps.installHint}\` inside the project. To install them yourself instead, run it in ${cwd}.`:deps.detail,missingCount:deps.missingCount||0});
  }
  return send(res,200,{checks,checkedAt:Date.now(),note:'Read-only local checks. No AI requests, dependency installations or package scripts.'});
 }if(req.method==='GET'&&url.pathname==='/api/providers')return send(res,200,{providers:await Promise.all(CLI_NAMES.map(checkProvider)),loginCommands:LOGIN_COMMANDS});if(req.method==='POST'&&url.pathname==='/api/providers/agy/confirm'){
@@ -847,7 +977,7 @@ export async function startEngine({port=0}={}){ensureData();loadPreviousRuns();c
   const readiness=await workflowReadiness([state.stages[state.startIndex]],run.cwd);
   if(pending.code==='DOCKER_UNAVAILABLE'&&!state.stages[state.startIndex].requiresDocker){const docker=await dockerDaemonPreflight();if(docker.status!=='ready')readiness.push(`Docker still unavailable: ${docker.detail} ${docker.raw||''}`);}
   if(readiness.length)return send(res,409,{error:'Stage environment is still blocked. No tokens used.\n'+readiness.join('\n')});
-  const prior=run.stageResults.at(-1);if(prior?.status==='blocked'||prior?.status==='partial')prior.status='blocked-previous-attempt';
+  const prior=run.stageResults.at(-1);if(['blocked','partial','interrupted'].includes(prior?.status))prior.status='blocked-previous-attempt';
   run.recoveryAttempts??={};run.recoveryAttempts[pending.stageId]=pending.attempts+1;
   run.pendingRecovery=null;continuations.delete(run.id);
   emit(run,'system',`User explicitly requested stage-only retry (${run.recoveryAttempts[pending.stageId]}/${pending.maxAttempts}). Previous completed stages remain intact; a new model request may incur cost.`,{stageId:pending.stageId});

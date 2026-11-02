@@ -48,7 +48,7 @@ const impl={id:'implement',name:'Implementation',role:'implement',agent:'codex',
 const plan={id:'plan',name:'Planning',role:'plan',agent:'codex',modelMode:'default',effort:'default',instructions:'Plan the work'};
 const review={id:'review',name:'Review',role:'review',agent:'codex',modelMode:'default',effort:'default',reviewLoop:true,returnTo:'implement',maxRetries:1,instructions:'Review feature.js'};
 const args=makeCommand(impl,'PROMPT TEST',{isGitRepo:false,cwd:repo});
-assert.equal(args[0],'codex');assert.equal(args[1].at(-1),'-');assert.deepEqual(args[2],{input:'PROMPT TEST'});assert.equal(args[1][args[1].indexOf('--sandbox')+1],'workspace-write');
+assert.equal(args[0],'codex');assert.equal(args[1].at(-1),'-');assert.equal(args[2].input,'PROMPT TEST');assert.equal(args[1][args[1].indexOf('--sandbox')+1],'workspace-write');
 const child=spawn(process.execPath,[join(root,'packages/engine/server.mjs')],{cwd:root,env:{...process.env,PATH:bin+':'+process.env.PATH,HOME:temp},stdio:['ignore','pipe','pipe']});
 child.stderr.on('data',d=>process.stderr.write(d));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));

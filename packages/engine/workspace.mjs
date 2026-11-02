@@ -7,7 +7,7 @@ import { lstat, readdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join, relative, resolve, sep } from 'node:path';
 
-const IGNORED_DIRS = new Set(['.git','.svn','.hg','node_modules','.next','.nuxt','dist','build','out','coverage','.turbo','.cache','.venv','venv','__pycache__','bin','obj','.idea','.sbq-agents-hub']);
+const IGNORED_DIRS = new Set(['.git','.svn','.hg','node_modules','.next','.nuxt','dist','build','out','coverage','.turbo','.cache','.venv','venv','__pycache__','bin','obj','.idea','.sbq-agents-hub','.pnpm-store','.yarn-cache','.npm-cache','.parcel-cache','.svelte-kit','.vite','.angular','.gradle','.pytest_cache','.mypy_cache','.ruff_cache']);
 const IGNORED_FILES = new Set(['.DS_Store','Thumbs.db']);
 const MAX_FILES = 30000;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;

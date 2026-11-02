@@ -25,7 +25,7 @@ try{
   let info;for(let i=0;i<70;i++){await sleep(100);try{info=JSON.parse(readFileSync(join(dir,'.sbq-agents-hub','daemon.json'),'utf8'));break;}catch{}}
   if(!info)throw Error('SBQ engine did not start');
   const api=async(method,path,body)=>{const r=await fetch(`http://127.0.0.1:${info.port}${path}`,{method,headers:{authorization:`Bearer ${info.token}`,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});return{status:r.status,data:await r.json()};};
-  if((await api('GET','/api/health')).data.version!=='0.5.14')throw Error('Version mismatch');
+  if((await api('GET','/api/health')).data.version!==JSON.parse((await import('node:fs')).readFileSync('package.json','utf8')).version)throw Error('Version mismatch');
   const providers=(await api('GET','/api/providers')).data.providers;
   if(!providers.some(p=>p.id==='freebuff'&&p.installed&&p.interactiveOnly))throw Error('Freebuff status not safe');
   if(!providers.some(p=>p.id==='kilo'&&p.installed))throw Error('Kilo missing');

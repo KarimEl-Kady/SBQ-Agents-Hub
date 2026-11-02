@@ -231,7 +231,7 @@ html,body{min-width:0;overflow:hidden}
 .sbq-preflight-item{display:flex;align-items:center;gap:8px;flex:1;min-width:95px;padding:4px 9px;border-left:1px solid #30414f}
 .sbq-preflight-item>span{font-size:17px;color:#d6aa6a}.sbq-preflight-item.ready>span{color:#65d9a1}.sbq-preflight-item.blocked>span{color:#ff9094}
 .sbq-preflight-item div{display:grid;gap:1px;min-width:0}.sbq-preflight-item strong{font-size:10px;white-space:nowrap}.sbq-preflight-item small{font-size:10px;color:#9eafbc}
-.sbq-preflight-item.blocked small{color:#f5a5a8}.sbq-preflight-item.ready small{color:#80d3af}
+.sbq-preflight-item.blocked small{color:#f5a5a8}.sbq-preflight-item.warning>span,.sbq-preflight-item.warning small{color:#e9c27f}#inspectAllowNetworkRow[hidden]{display:none}.sbq-preflight-item.ready small{color:#80d3af}
 .sbq-preflight-card>button{white-space:nowrap;flex:none}
 .flow-strip{gap:4px;margin-bottom:3px;scrollbar-width:thin}.flow-chip{border-radius:12px;min-width:145px;max-width:none;padding:10px 11px}
 .flow-chip .chip-num{height:29px;width:29px;flex-basis:29px}.flow-chip.passed{background:#0f2821;border-color:#26674b}

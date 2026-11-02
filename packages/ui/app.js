@@ -176,7 +176,7 @@
   const status=latest.status;
   if(status==='verified')return{label:'Passed',cls:'passed',glyph:'✓'};
   if(status==='skipped')return{label:'Skipped',cls:'skipped',glyph:'–'};
-  if(['blocked','partial','blocked-previous-attempt','unverified','failed'].includes(status))return{label:status==='blocked'?'Blocked':'Needs attention',cls:'blocked',glyph:'!'};
+  if(['blocked','partial','blocked-previous-attempt','unverified','failed','interrupted'].includes(status))return{label:status==='blocked'?'Blocked':'Needs attention',cls:'blocked',glyph:'!'};
   if(status==='fix-required')return{label:'Fix required',cls:'needs-fix',glyph:'↻'};
   if(['awaiting-approval','paused-for-approval'].includes(status))return{label:'Approval needed',cls:'needs-fix',glyph:'!'};
   if(runStatus==='running'||runStatus==='queued')return{label:'Running',cls:'running',glyph:'◌'};
@@ -209,9 +209,9 @@
    const data=await bridge('GET','/api/preflight?cwd='+encodeURIComponent(currentRun?.cwd||$('cwd').value.trim()));
    container.replaceChildren();for(const item of data.checks||[]){
     const el=document.createElement('div');el.className='sbq-preflight-item '+(['blocked','invalid'].includes(item.status)?'blocked':item.status);
-    const glyph=document.createElement('span');glyph.textContent=item.status==='ready'?'✓':['blocked','invalid'].includes(item.status)?'!':'◌';
-    const details=document.createElement('div');const label=document.createElement('strong');label.textContent=item.label;const state=document.createElement('small');state.textContent=item.status==='ready'?'Ready':['blocked','invalid'].includes(item.status)?'Blocked':item.status==='not-applicable'?'Not needed':'Unverified';
-    details.append(label,state);if(['blocked','invalid'].includes(item.status)&&item.detail){const hint=document.createElement('small');hint.className='sbq-preflight-hint';hint.textContent=item.detail;details.appendChild(hint);}el.title=item.detail||'';el.append(glyph,details);container.appendChild(el);
+    const glyph=document.createElement('span');glyph.textContent=item.status==='ready'?'✓':['blocked','invalid'].includes(item.status)?'!':item.status==='warning'?'⚠':'◌';
+    const details=document.createElement('div');const label=document.createElement('strong');label.textContent=item.label;const state=document.createElement('small');state.textContent=item.status==='ready'?'Ready':['blocked','invalid'].includes(item.status)?'Blocked':item.status==='not-applicable'?'Not needed':item.status==='warning'?'Warning':'Unverified';
+    details.append(label,state);if(['blocked','invalid','warning'].includes(item.status)&&item.detail){const hint=document.createElement('small');hint.className='sbq-preflight-hint';hint.textContent=item.detail;details.appendChild(hint);}el.title=item.detail||'';el.append(glyph,details);container.appendChild(el);
    }
   }catch(e){container.textContent='Could not check agents: '+e.message;}finally{preflightInProgress=false;b.disabled=false;}
  }
@@ -374,7 +374,7 @@
   populateOptions($('inspectAgent'),AGENTS,s.agent);
   populateOptions($('inspectEffort'),EFFORT,s.effort||'default');
   $('inspectInstructions').value=s.instructions||'';
-  populateOptions($('inspectVerifyCommand'),VERIFY_COMMANDS,s.verifyCommand||'');$('inspectRequireChanges').checked=!!s.requireChanges;$('inspectRequiresDocker').checked=!!s.requiresDocker;
+  populateOptions($('inspectVerifyCommand'),VERIFY_COMMANDS,s.verifyCommand||'');$('inspectRequireChanges').checked=!!s.requireChanges;$('inspectRequiresDocker').checked=!!s.requiresDocker;const writableStage=['implement','support'].includes(s.role);$('inspectAllowNetworkRow').hidden=!writableStage;$('inspectAllowNetwork').checked=writableStage&&s.allowNetwork!==false;
   const myGeneration=++inspectorGeneration;const currentId=s.id;
   const modelSelect=$('inspectModel');populateOptions(modelSelect,[{value:'default',label:'Loading model catalog…'}],'default');modelSelect.disabled=true;
   $('inspectModelHint').textContent='Checking the local runner model catalog…';
@@ -389,7 +389,7 @@
   $('inspectCustomWrap').hidden=s.modelMode!=='custom';$('inspectCustom').value=s.modelMode==='custom'?s.model:'';
  }
  $('inspectStage').onchange=e=>{inspectedStageId=e.target.value;renderFlowStrip();renderInspector();};
- $('inspectRole').onchange=e=>{const s=currentStage();if(s){s.role=e.target.value;s.requireChanges=['implement','support'].includes(s.role);if(s.role!=='review')s.reviewLoop=false;}};
+ $('inspectRole').onchange=e=>{const s=currentStage();if(s){s.role=e.target.value;s.requireChanges=['implement','support'].includes(s.role);if(s.role!=='review')s.reviewLoop=false;$('inspectAllowNetworkRow').hidden=!s.requireChanges;$('inspectAllowNetwork').checked=s.requireChanges&&s.allowNetwork!==false;}};
  $('inspectAgent').onchange=e=>{const s=currentStage();if(s){s.agent=e.target.value;s.modelMode='default';s.model='';s.effort='default';renderFlowStrip();renderInspector();}};
  $('inspectModel').onchange=e=>{const s=currentStage();if(!s)return;const v=e.target.value;
   if(v==='default'){s.modelMode='default';s.model='';}else if(v==='__custom__'){s.modelMode='custom';s.model='';}else if(v!=='__unknown__'){s.modelMode='catalog';s.model=v;}
@@ -400,6 +400,7 @@
  $('inspectVerifyCommand').onchange=e=>{const s=currentStage();if(s)s.verifyCommand=e.target.value;};
  $('inspectRequireChanges').onchange=e=>{const s=currentStage();if(s)s.requireChanges=e.target.checked;};
  $('inspectRequiresDocker').onchange=e=>{const s=currentStage();if(s)s.requiresDocker=e.target.checked;};
+ $('inspectAllowNetwork').onchange=e=>{const s=currentStage();if(s)s.allowNetwork=e.target.checked;};
  $('inspectorSave').onclick=async()=>{if(workflow.some(x=>x.modelMode==='custom'&&!x.model.trim()))return toast('A custom model needs an exact CLI ID.');
   try{const out=await bridge('PUT','/api/workflow',{stages:workflow});workflow=out.stages;toast('Stage configuration saved');renderWorkflow();renderFlowStrip();renderInspector();$('stageCount').textContent=`${workflow.length} stages configured`;}catch(e){toast(e.message);}};
  async function loadMiniChanges(){const cwd=currentRun?.cwd||$('cwd').value.trim();const list=$('miniChangesFiles'),diff=$('miniDiff');if(!cwd){list.textContent='Select a project to see local changes.';diff.textContent='No diff loaded.';return;}

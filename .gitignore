@@ -12,3 +12,4 @@ Thumbs.db
 .agentflow/
 .handoff/
 coverage/
+apps/vscode/engine/

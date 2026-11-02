@@ -44,7 +44,7 @@ async function codexModels() {
     try{child=spawn('codex',['app-server','--listen','stdio://'],{env:process.env,windowsHide:true,stdio:['pipe','pipe','pipe']});}
     catch{return resolve([]);}
     const write=obj=>{try{child.stdin.write(JSON.stringify(obj)+'\n');}catch{finish();}};
-    const timer=setTimeout(()=>finish(),4500);
+    const timer=setTimeout(()=>finish(),12000); // app-server cold start can take several seconds
     child.stdin.on('error',()=>finish()); // Codex may exit before initialize; EPIPE is not a crash.
     child.on('error',()=>finish());child.on('close',()=>finish());
     child.stdout.on('data',data=>{
@@ -111,7 +111,8 @@ export async function modelCatalog(agent,{cwd,refresh=false}={}){
     const r=await run('agy',['models'],{cwd,timeout:6500});
     if(r.code===0){models=fromLines(r.output,line=>{
       if(!line||/^(available|model|[-=]+|usage|\$)/i.test(line))return null;
-      const m=line.match(/^([a-z][a-z0-9.-]+)\s{2,}(.+)$/i);
+      // agy separates columns with a TAB; older builds padded with spaces.
+      const m=line.match(/^([a-z][a-z0-9.-]+)(?:\t+|\s{2,})(.+)$/i);
       if(m)return{id:m[1],label:m[2].trim(),source:'cli'};
       if(/^(gemini|claude|gpt)[\w .()\/-]+$/i.test(line)&&!line.includes(':'))return{id:line,label:line,source:'cli'};
       return null;
@@ -147,9 +148,12 @@ export async function validateStagesForRun(stages,{cwd}={}){
       // This is a read-only CLI operation and never consumes coding-model tokens.
       catalog=await modelCatalog(s.agent,{cwd,refresh:true});catalogs.set(s.agent,catalog);
     }
+    // An unreadable catalog proves nothing about the model: let the CLI decide
+    // and report its own error instead of blocking every run up front.
+    if(!catalog.models.length)continue;
     if(!catalog.models.some(m=>m.id===s.model)){
       const sample=catalog.models.slice(0,5).map(m=>m.id).join(', ');
-      const reason=catalog.models.length?'is not currently listed by the CLI':'could not be verified (no readable CLI catalog)';
+      const reason='is not currently listed by the CLI';
       errors.push(`Stage ${index+1} (${s.name}): model "${s.model}" ${reason} for ${s.agent}. Open Workflows and choose CLI Default, or explicitly select Custom model ID to try this exact ID at your own risk. ${sample?'Models currently listed: '+sample+'. ':''}No model request was sent.`);
     }
   }

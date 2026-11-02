@@ -5,7 +5,8 @@ const files=[
  'test-responsive.mjs','test-verified-workflow.mjs','test-codex-bridge.mjs',
  'test-claude-planning.mjs','test-antigravity-connection.mjs','test-permission-workflow.mjs',
  'test-codex-sandbox.mjs','test-model-recovery.mjs','test-orchestration-contract.mjs',
- 'test-stage-recovery.mjs','test-gitless-changes.mjs','test-project-readiness.mjs'
+ 'test-stage-recovery.mjs','test-gitless-changes.mjs','test-project-readiness.mjs',
+ 'test-setup-and-auth.mjs','test-restart-recovery.mjs'
 ];
 let passed=0;
 for(const file of files){

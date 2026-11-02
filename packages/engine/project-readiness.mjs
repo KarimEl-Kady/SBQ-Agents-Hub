@@ -23,6 +23,16 @@ function findManifests(root){
  }
  return found;
 }
+// The project's declared tool wins (package.json "packageManager"), then
+// workspace files, then lockfiles. A stray package-lock.json in a pnpm project
+// must not switch the agent to npm: mixing managers breaks node_modules.
+export function detectPackageManager(root){
+ try{const declared=String(JSON.parse(readFileSync(join(root,'package.json'),'utf8')).packageManager||'').match(/^(npm|pnpm|yarn|bun)@/);if(declared)return declared[1];}catch{}
+ if(existsSync(join(root,'pnpm-workspace.yaml'))||existsSync(join(root,'pnpm-lock.yaml')))return 'pnpm';
+ if(existsSync(join(root,'yarn.lock'))||existsSync(join(root,'.yarnrc.yml')))return 'yarn';
+ if(existsSync(join(root,'bun.lock'))||existsSync(join(root,'bun.lockb')))return 'bun';
+ return 'npm';
+}
 function isLocalSpec(spec){return /^(?:workspace:|file:|link:)/.test(String(spec||''));}
 function dependencyFound(base,root,name){
  // Dependencies may be hoisted to the repository root by npm workspaces.
@@ -57,7 +67,7 @@ export function checkProjectDependencies(cwd){
  if(existsSync(join(root,'.pnp.cjs'))||existsSync(join(root,'.pnp.js')))
   return{status:'ready',detail:'Yarn Plug’n’Play installation detected. Individual modules not probed.',missing:[],checked,manifests:all.map(x=>relative(root,x.file))};
  if(missing.length){
-  const manager=existsSync(join(root,'pnpm-lock.yaml'))?'pnpm':existsSync(join(root,'yarn.lock'))?'yarn':existsSync(join(root,'bun.lock'))||existsSync(join(root,'bun.lockb'))?'bun':'npm';
+  const manager=detectPackageManager(root);
   const installHint=manager==='npm'?(existsSync(join(root,'package-lock.json'))?'npm ci':'npm install'):`${manager} install`;
   return{status:'blocked',code:'PROJECT_DEPENDENCIES_MISSING',detail:`${missing.length} required package(s) not installed. Install dependencies on the HOST with your permission before using AI tokens. Suggested command in ${root}: ${installHint}. Review package scripts before running it; do not use sudo.`,manager,installHint,missing:missing.slice(0,20),missingCount:missing.length,checked,manifests:all.map(x=>relative(root,x.file))};
  }

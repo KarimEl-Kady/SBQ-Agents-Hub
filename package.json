@@ -5,11 +5,11 @@
   "description": "SBQ Agents Hub — local-first multi-agent coding workspace for Windows, macOS and Linux",
   "scripts": {
     "engine": "node packages/engine/server.mjs",
-    "desktop": "electron apps/desktop/main.cjs",
+    "desktop": "node scripts/desktop.mjs",
     "doctor:linux": "node scripts/linux-doctor.mjs",
     "sync:extension": "node scripts/sync-extension.mjs",
     "extension:package": "npm run sync:extension && cd apps/vscode && npx @vscode/vsce package",
-    "check": "node --check packages/engine/project-readiness.mjs && node --check packages/engine/workspace.mjs && node --check packages/engine/server.mjs && node --check packages/engine/models.mjs && node --check packages/engine/git.mjs && node --check apps/desktop/main.cjs && node --check apps/desktop/preload.cjs && node --check apps/vscode/extension.js && node --check packages/ui/app.js",
+    "check": "node --check packages/engine/project-readiness.mjs && node --check packages/engine/workspace.mjs && node --check packages/engine/server.mjs && node --check packages/engine/models.mjs && node --check packages/engine/git.mjs && node --check apps/desktop/main.cjs && node --check apps/desktop/preload.cjs && node --check apps/vscode/extension.js && node --check packages/ui/app.js && node --check scripts/linux-checks.mjs && node --check scripts/desktop.mjs",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:integration": "node scripts/integration-test.mjs",
     "test:sbq": "node scripts/test-sbq.mjs",
@@ -33,10 +33,13 @@
     "test:gitless": "node scripts/test-gitless-changes.mjs",
     "test:dependencies": "node scripts/test-project-readiness.mjs",
     "test:all": "node scripts/run-all-tests.mjs",
-    "doctor:project": "node scripts/project-doctor.mjs"
+    "doctor:project": "node scripts/project-doctor.mjs",
+    "postinstall": "node scripts/linux-doctor.mjs --postinstall",
+    "test:setup": "node scripts/test-setup-and-auth.mjs",
+    "test:restart": "node scripts/test-restart-recovery.mjs"
   },
   "devDependencies": {
-    "electron": "^33.4.11",
+    "electron": "^45.2.1",
     "electron-builder": "^26.0.0"
   },
   "main": "apps/desktop/main.cjs",

@@ -8,7 +8,7 @@ const tmp=mkdtempSync(join(tmpdir(),'sbq-dep-preflight-'));
 const root=resolve('.'),repo=join(tmp,'crm'),bin=join(tmp,'bin');
 mkdirSync(repo);mkdirSync(bin);
 const put=(path,data)=>{mkdirSync(join(path,'..'),{recursive:true});writeFileSync(path,data)};
-const stages=[{id:'plan',name:'Planning',role:'plan',agent:'claude',modelMode:'default'},{id:'build',name:'Implementation',role:'implement',agent:'codex',requireChanges:true,modelMode:'default'}];
+const stages=[{id:'plan',name:'Planning',role:'plan',agent:'claude',modelMode:'default'},{id:'build',name:'Implementation',role:'implement',agent:'codex',requireChanges:true,modelMode:'default',allowNetwork:false}];
 try{
  assert.equal(checkProjectDependencies(repo).status,'not-applicable','an empty new project is allowed');
  put(join(repo,'package.json'),JSON.stringify({name:'crm',private:true,workspaces:['apps/*'],dependencies:{'left-pad':'1.3.0'}}));
@@ -26,6 +26,11 @@ try{
   for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,80));try{daemon=JSON.parse(readFileSync(join(tmp,'.sbq-agents-hub','daemon.json'),'utf8'));break}catch{}}
   assert.ok(daemon,'engine starts');
   const api=async(method,p,body)=>{const res=await fetch(`http://127.0.0.1:${daemon.port}${p}`,{method,headers:{authorization:`Bearer ${daemon.token}`,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});return{status:res.status,body:await res.json()};};
+  // With package installs allowed, missing node_modules is a warning, not a dead end.
+  const installing=stages.map(x=>x.id==='build'?{...x,allowNetwork:true}:x);
+  assert.equal((await api('PUT','/api/workflow',{stages:installing})).status,200);
+  const warn=(await api('GET','/api/preflight?cwd='+encodeURIComponent(repo))).body.checks.find(x=>x.agent==='project-dependencies');
+  assert.equal(warn.status,'warning');assert.match(warn.detail,/npm install/);
   assert.equal((await api('PUT','/api/workflow',{stages})).status,200);
   const readiness=await api('GET','/api/project-readiness?cwd='+encodeURIComponent(repo));assert.equal(readiness.body.status,'blocked');
   const preflight=await api('GET','/api/preflight?cwd='+encodeURIComponent(repo));
@@ -53,5 +58,5 @@ try{
  }finally{engine.kill('SIGTERM');}
  const bad=join(tmp,'invalid');mkdirSync(bad);writeFileSync(join(bad,'package.json'),'bad json');assert.equal(checkProjectDependencies(bad).status,'invalid');
  const pnp=join(tmp,'pnp');mkdirSync(pnp);put(join(pnp,'package.json'),JSON.stringify({dependencies:{foo:'1'}}));writeFileSync(join(pnp,'.pnp.cjs'),'');assert.equal(checkProjectDependencies(pnp).status,'ready');
- console.log('PASS: existing missing npm dependencies block before planning; zero token calls; hoisted workspace install permits execution; new/invalid/PnP projects handled; incomplete stage is not falsely approved');
+ console.log('PASS: missing npm dependencies block before planning when no stage may install, warn when one can; zero token calls; hoisted workspace install permits execution; new/invalid/PnP projects handled; incomplete stage is not falsely approved');
 }finally{rmSync(tmp,{recursive:true,force:true});}
