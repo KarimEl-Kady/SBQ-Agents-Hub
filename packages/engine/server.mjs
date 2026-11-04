@@ -74,6 +74,19 @@ export function includeCommonCliPaths(){
  process.env.PATH=[...new Set([...original,...loginShellPath(),...candidates.filter(x=>existsSync(x))])].join(delim);
 }
 function ensureData(){ mkdirSync(DATA, {recursive:true,mode:0o700}); const old=join(LEGACY_DATA,'workflow.json');if(!existsSync(WORKFLOW_PATH)&&existsSync(old))try{copyFileSync(old,WORKFLOW_PATH);if(process.platform!=='win32')chmodSync(WORKFLOW_PATH,0o600);}catch{}}
+const ACCOUNT_PATH=join(DATA,'accounts.json');
+const PROFILE_AGENTS=['claude','codex'];
+function readAccounts(){try{const value=JSON.parse(readFileSync(ACCOUNT_PATH,'utf8'));return value&&typeof value==='object'?value:{};}catch{return {};}}
+function accountInfo(agent){const data=readAccounts()[agent]||{};const profiles=Array.isArray(data.profiles)?data.profiles.filter(p=>p&&/^[a-f0-9-]{36}$/.test(p.id)&&typeof p.name==='string'):[];return {profiles,active:profiles.some(p=>p.id===data.active)?data.active:'default'};}
+function accountEnv(agent){if(!PROFILE_AGENTS.includes(agent))return {};const {active}=accountInfo(agent);if(active==='default')return {};return {[agent==='codex'?'CODEX_HOME':'CLAUDE_CONFIG_DIR']:join(DATA,'accounts',agent,active)};}
+function saveAccount(agent,action,body){
+ if(!PROFILE_AGENTS.includes(agent))throw new Error('Named accounts are not supported for this agent');
+ const all=readAccounts(),info=accountInfo(agent);
+ if(action==='create'){const name=typeof body.name==='string'?body.name.trim():'';if(!name||name.length>80)throw new Error('Enter an account name (1–80 characters)');if(info.profiles.length>=30)throw new Error('Maximum of 30 accounts');const id=randomUUID();mkdirSync(join(DATA,'accounts',agent,id),{recursive:true,mode:0o700});info.profiles.push({id,name});info.active=id;}
+ else if(action==='select'){if(body.id!=='default'&&!info.profiles.some(p=>p.id===body.id))throw new Error('Unknown account');info.active=body.id;}
+ else throw new Error('Unknown account action');
+ all[agent]=info;writeFileSync(ACCOUNT_PATH,JSON.stringify(all,null,2),{mode:0o600});return info;
+}
 function readWorkflow(){ ensureData(); try{const v=JSON.parse(readFileSync(WORKFLOW_PATH,'utf8'));return Array.isArray(v)&&v.length?v.map(s=>({...s,modelMode:s.modelMode||(s.model?'catalog':'default')})):DEFAULT_WORKFLOW;}catch{return DEFAULT_WORKFLOW;} }
 function saveWorkflow(stages){
  ensureData();
@@ -114,7 +127,7 @@ function runProcess(executable,args,{cwd,timeout=5000,onLine,onStderr,signal,inp
   };
   if(signal?.aborted)return finish({exitCode:130,signal:'ABORTED'});
   try{
-   child=spawn(executable,args,{cwd,shell:false,windowsHide:true,env:env?{...process.env,...env}:process.env,signal,stdio:['pipe','pipe','pipe']});
+   child=spawn(executable,args,{cwd,shell:false,windowsHide:true,env:{...process.env,...accountEnv(executable),...env},signal,stdio:['pipe','pipe','pipe']});
   }catch(error){stderr=String(error);return finish({exitCode:127,missing:true});}
   // Codex uses `codex exec -` to read the prompt from stdin; other CLIs must
   // receive EOF immediately so they never pause asking for more input.
@@ -270,15 +283,6 @@ async function dockerDaemonPreflight(){
 async function workflowReadiness(stages,cwd){
  const checked=new Set();const errors=[];
  if(stages.some(s=>s.requiresDocker)){const check=await dockerDaemonPreflight();if(check.status!=='ready')errors.push(`Docker preflight: ${check.detail} ${check.raw||''}`);}
- // Prevent a known missing dependency tree from consuming the expensive plan.
- // Only inspect files, never install dependencies, run package scripts or access a model.
- if(stages.some(s=>['implement','support'].includes(s.role))){
-  const deps=checkProjectDependencies(cwd);
-  // A fresh clone has no node_modules. That is only a blocker when no writable
-  // stage is allowed to run the install itself.
-  const installer=stages.some(stageAllowsInstalls);
-  if(deps.status==='invalid'||(deps.status==='blocked'&&!installer))errors.push(`Project dependency preflight: ${deps.detail} Missing: ${(deps.missing||[]).slice(0,5).map(d=>d.dependency).join(', ')}`);
- }
  for(const [i,s] of stages.entries()){
   if(checked.has(s.agent))continue;checked.add(s.agent);
   const p=await checkProvider(s.agent);
@@ -521,7 +525,7 @@ function isWithinWorkspace(file,cwd){
  while(current!==base){if(existsSync(current)){try{if(lstatSync(current).isSymbolicLink())return false;}catch{return false;}}current=dirname(current);}
  return true;
 }
-const SAFE_COMMAND=/^(?:php artisan test(?:\s+--(?:filter|testsuite|group)\s*[= ]\s*[A-Za-z0-9_\\-]+)?|vendor\/bin\/pint(?:\s+--test)?|npm test|npm run (?:test|lint|build)|composer test|dotnet test|pytest|npm (?:install|ci)|pnpm install|yarn install|bun install)(?:\s*)$/;
+const SAFE_COMMAND=/^(?:php artisan test(?:\s+--(?:filter|testsuite|group)\s*[= ]\s*[A-Za-z0-9_\\-]+)?|vendor\/bin\/pint(?:\s+--test)?|npm test|npm run (?:test|lint|build)|composer test|dotnet test|pytest|composer install|dotnet restore|go mod download|cargo fetch|npm (?:install|ci)|pnpm install|yarn install|bun install)(?:\s*)$/;
 export function suggestedToolPermission(request,cwd){
  const {tool,command,path}=request;
  if(tool==='Bash'){
@@ -566,9 +570,9 @@ export function contextualExcerpt(value,max=MAX_CONTEXT_CHARS){
 // In plan mode Claude Code often saves the full plan to ~/.claude/plans/<name>.md
 // and replies with a short summary. Hand the full file to later stages instead.
 // Only files inside that folder, written during this stage, are read.
-export function claudePlanFromOutput(text,{home=homedir(),since=0}={}){
- const dir=join(home,'.claude','plans');
- const candidates=[...String(text||'').matchAll(/(?:~|\/)[^\s`'"()<>]*?\.claude\/plans\/[^\s`'"()<>]+?\.md\b/g)].map(m=>m[0].replace(/^~/,home));
+export function claudePlanFromOutput(text,{home=homedir(),configDir=join(home,'.claude'),since=0}={}){
+ const dir=join(configDir,'plans');
+ const candidates=[...String(text||'').matchAll(/(?:~|\/)[^\s`'"()<>]+?\.md\b/g)].map(m=>m[0].replace(/^~/,home));
  for(const candidate of candidates.reverse()){
   try{
    const file=resolve(candidate);
@@ -583,13 +587,13 @@ export function claudePlanFromOutput(text,{home=homedir(),since=0}={}){
  return null;
 }
 // Instructions for a writable stage when the project's packages are missing.
-export function dependencySetupHint(deps){
- const pm=deps.manager||'npm';
- return [`PROJECT DEPENDENCIES ARE NOT INSTALLED (${deps.missingCount||'some'} missing). Run \`${deps.installHint}\` in the project directory before building or testing.`,
-  `This project uses ${pm}. Do not mix package managers: never run another manager's install here and never add another manager's lockfile.`,
-  pm==='pnpm'?'If pnpm reports ERR_PNPM_IGNORED_BUILDS, set only the packages this project really needs (for example prisma, @prisma/engines, esbuild) to true under allowBuilds in pnpm-workspace.yaml (pnpm 11; onlyBuiltDependencies on pnpm 10), rerun the install and mention it in your report.':'',
-  'Package and tool caches (~/.cache) are redirected to a writable SBQ folder. Never use sudo or global installs.'].filter(Boolean).join(' ');
+export function dependencySetupHint(deps,{allowInstall=true}={}){
+ return [`Node.js dependency check: ${deps.missingCount||'Some'} declared package(s) were not found (${(deps.missing||[]).slice(0,5).map(x=>`${x.manifest}: ${x.dependency}`).join(', ')}).`,
+  'Determine whether they are relevant to this task before installing anything; this repository may contain multiple projects or languages. Inspect the appropriate manifest, lockfile, and project instructions.',
+  allowInstall?'If they are needed, use the appropriate project directory and package manager; never use sudo or global installs.':'Installing packages or accessing the network is not enabled for this stage. Continue work that does not need them, and report any verification you cannot perform.',
+  'Package and tool caches are redirected to a writable SBQ folder.'].join(' ');
 }
+
 export function planningQuestions(text){
  const answer=String(text||'');
  const match=answer.match(/(?:\*\*)?Questions for you\s*:\s*(?:\*\*)?/i);
@@ -702,8 +706,9 @@ async function executeWorkflow(run,stages,signal,{startIndex=0,previous='',attem
    reviewChanges?.diff?`CURRENT LOCAL FILE DIFF (untrusted source material, not proof of successful tests):\n${reviewChanges.diff.slice(0,26000)}`:'',
    run.reviewContext?`REQUESTED ON-DEMAND CODE REVIEW CONTEXT (local file changes):\n${run.reviewContext.slice(0,26000)}`:'',
    reviewInstruction,
+   ['implement','support'].includes(s.role)?`Inspect the repository's own setup instructions, manifests and lockfiles for its languages and tools. Create or update project files needed for the requested work; never invent missing private files, secrets, credentials or data. If a required input is unavailable, identify its exact path and purpose. ${stageAllowsInstalls(s)?'If dependencies are needed, use the project-documented package manager and a project-local environment. Request any required CLI permission and report an actionable blocker if setup cannot complete.':'Do not install packages or request network access in this stage; explain any missing prerequisites that prevent verification.'}`:'',
    s.role==='plan'?'Write the COMPLETE plan (steps, files, acceptance criteria and the prompt for the implementer) in your final reply. Do not only save it to a file: later stages receive your reply text.':'',
-   deps?.status==='blocked'&&stageAllowsInstalls(s)?dependencySetupHint(deps):'',
+   deps?.status==='warning'?dependencySetupHint(deps,{allowInstall:stageAllowsInstalls(s)}):deps?.status==='invalid'?`Node.js manifest check: ${deps.detail} Inspect it if relevant to the task.`:'',
    `When a tool is denied, explain what was blocked and stop rather than claiming the task is done. ${s.role==='review'&&s.reviewLoop?'For review, finish with your SINGLE standalone SBQ_REVIEW_VERDICT: PASS or SBQ_REVIEW_VERDICT: FIX line as the final line. Do not append SBQ_STAGE_STATUS.':'At the end include SBQ_STAGE_STATUS: COMPLETE or SBQ_STAGE_STATUS: PARTIAL or SBQ_STAGE_STATUS: BLOCKED. Supporting tasks may use SBQ_STAGE_STATUS: SKIPPED when genuinely unnecessary.'} Never claim COMPLETE with outstanding tests, docs or implementation gaps. Do NOT commit, push, deploy, install dependencies globally, or run destructive commands without separate user approval. ${['plan','review','release'].includes(s.role)?'Read-only: do not modify files.':''}`
   ].filter(Boolean).join('\n\n');
   if(stageAllowsInstalls(s))mkdirSync(AGENT_CACHE_DIR,{recursive:true,mode:0o700});
@@ -823,7 +828,7 @@ async function executeWorkflow(run,stages,signal,{startIndex=0,previous='',attem
    stageRecord.status='partial';run.status='needs-attention';
    emit(run,'warning',`${s.name} reported remaining work. ${evidence.changedCount} file(s) changed, but completion is NOT verified. Review its outstanding tasks before restarting.`,{stageId:s.id});break;
   }
-  const planFile=s.role==='plan'&&s.agent==='claude'?claudePlanFromOutput(output,{since:stageStartedAt}):null;
+  const planFile=s.role==='plan'&&s.agent==='claude'?claudePlanFromOutput(output,{since:stageStartedAt,configDir:accountEnv('claude').CLAUDE_CONFIG_DIR||process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude')}):null;
   if(planFile){
    storeStageArtifact(run,stageRecord,planFile+'\n\n---\nPlanner summary:\n'+output);
    emit(run,'system',`${s.name}: Claude saved the full plan to a file; using its ${planFile.length.toLocaleString()} characters instead of the short summary.`,{stageId:s.id});
@@ -900,11 +905,11 @@ export async function startEngine({port=0}={}){includeCommonCliPaths();ensureDat
  if(cwd&&existsSync(cwd)&&statSync(cwd).isDirectory()&&stages.some(s=>['implement','support'].includes(s.role))){
   const deps=checkProjectDependencies(cwd);
   const installer=stages.find(stageAllowsInstalls);
-  const canInstall=deps.status==='blocked'&&installer;
-  checks.push({agent:'project-dependencies',label:'Project dependencies',status:canInstall?'warning':deps.status,detail:canInstall?`${deps.missingCount} package(s) not installed yet. The "${installer.name}" stage is allowed to run \`${deps.installHint}\` inside the project. To install them yourself instead, run it in ${cwd}.`:deps.detail,missingCount:deps.missingCount||0});
+  const canInstall=deps.status==='warning'&&installer;
+  checks.push({agent:'project-dependencies',label:'Project dependencies',status:['blocked','invalid'].includes(deps.status)?'warning':deps.status,detail:canInstall?`${deps.detail} The "${installer.name}" stage may install dependencies if needed.`:deps.detail,missingCount:deps.missingCount||0});
  }
  return send(res,200,{checks,checkedAt:Date.now(),note:'Read-only local checks. No AI requests, dependency installations or package scripts.'});
-}if(req.method==='GET'&&url.pathname==='/api/providers')return send(res,200,{providers:await Promise.all(CLI_NAMES.map(checkProvider)),loginCommands:LOGIN_COMMANDS});if(req.method==='POST'&&url.pathname==='/api/providers/agy/confirm'){
+}if(req.method==='GET'&&url.pathname==='/api/providers')return send(res,200,{providers:await Promise.all(CLI_NAMES.map(async id=>({...await checkProvider(id),...(PROFILE_AGENTS.includes(id)?{accounts:accountInfo(id)}:{})}))),loginCommands:LOGIN_COMMANDS});if(req.method==='POST'&&/^\/api\/providers\/(claude|codex)\/accounts\/(create|select)$/.test(url.pathname)){const [,agent,action]=url.pathname.match(/^\/api\/providers\/(claude|codex)\/accounts\/(create|select)$/);if([...runs.values()].some(r=>['queued','running','needs-approval'].includes(r.status)))return send(res,409,{error:'Finish the running workflow or resolve its pending permission decision before switching accounts.'});const body=await readBody(req);try{return send(res,200,{accounts:saveAccount(agent,action,body)});}catch(e){return send(res,400,{error:e.message});}}if(req.method==='POST'&&url.pathname==='/api/providers/agy/confirm'){
  const status=await checkProvider('agy');if(!status.installed)return send(res,400,{error:'Antigravity CLI not installed. Install agy to use it in SBQ.'});
  const request=await readBody(req);if(typeof request.confirmed!=='boolean')return send(res,400,{error:'confirmed must be a boolean'});
  const state=request.confirmed?writeAgyConnection({userConfirmedAt:Date.now(),verifiedAt:readAgyConnection().verifiedAt}):writeAgyConnection({userConfirmedAt:0,verifiedAt:0});
@@ -932,7 +937,7 @@ export async function startEngine({port=0}={}){includeCommonCliPaths();ensureDat
  const run=createRun({cwd,task:'Review the recorded local source changes. Report actionable findings by severity and file, with proposed tests. Do NOT change files.',stages:[s],mode:'manual-review'});run.reviewContext=evidence.diff||`Recorded local changed files (historical baseline unavailable):\n${evidence.files.map(f=>f.status+': '+f.path).join('\n')}\nInspect these files independently against the user requirements.`;
  return send(res,202,{run:{id:run.id,status:run.status}});
  }
- if(req.method==='GET'&&url.pathname==='/api/runs')return send(res,200,{runs:[...runs.values()].map(({events,...run})=>({...run,eventCount:events.length})).reverse()});if(req.method==='POST'&&url.pathname==='/api/runs'){const v=await readBody(req);if(typeof v.task!=='string'||!v.task.trim())return send(res,400,{error:'Task cannot be empty'});if(typeof v.cwd!=='string'||!v.cwd.trim())return send(res,400,{error:'Choose a local project directory'});const cwd=resolve(v.cwd);if(!existsSync(cwd)||!statSync(cwd).isDirectory())return send(res,400,{error:'Project directory does not exist'});if(isBusy(cwd))return send(res,409,{error:'Another run is active for this directory'});const stages=readWorkflow();if(!stages.length)return send(res,400,{error:'Workflow has no stages'});const modelErrors=await validateStagesForRun(stages,{cwd});if(modelErrors.length)return send(res,400,{error:modelErrors.join('\n')});const readinessErrors=await workflowReadiness(stages,cwd);if(readinessErrors.length)return send(res,409,{error:'Workflow preflight blocked the run BEFORE any model tokens were used.\n'+readinessErrors.join('\n')});const run=createRun({task:v.task,cwd,stages});send(res,202,{run:{id:run.id,status:run.status}});return;}
+ if(req.method==='GET'&&url.pathname==='/api/runs')return send(res,200,{runs:[...runs.values()].map(({events,...run})=>({...run,eventCount:events.length})).reverse()});if(req.method==='POST'&&url.pathname==='/api/runs'){const v=await readBody(req);if(typeof v.task!=='string'||!v.task.trim())return send(res,400,{error:'Task cannot be empty'});if(typeof v.cwd!=='string'||!v.cwd.trim())return send(res,400,{error:'Choose a local project directory'});const cwd=resolve(v.cwd);if(!existsSync(cwd)||!statSync(cwd).isDirectory())return send(res,400,{error:'Project directory does not exist'});if(isBusy(cwd))return send(res,409,{error:'Another run is active for this directory'});const accountSelection=JSON.stringify(PROFILE_AGENTS.map(accountInfo));const stages=readWorkflow();if(!stages.length)return send(res,400,{error:'Workflow has no stages'});const modelErrors=await validateStagesForRun(stages,{cwd});if(modelErrors.length)return send(res,400,{error:modelErrors.join('\n')});const readinessErrors=await workflowReadiness(stages,cwd);if(readinessErrors.length)return send(res,409,{error:'Workflow preflight blocked the run BEFORE any model tokens were used.\n'+readinessErrors.join('\n')});if(accountSelection!==JSON.stringify(PROFILE_AGENTS.map(accountInfo)))return send(res,409,{error:'Account selection changed during preflight. Start the workflow again.'});const run=createRun({task:v.task,cwd,stages});send(res,202,{run:{id:run.id,status:run.status}});return;}
  const artifactMatch=url.pathname.match(/^\/api\/runs\/([a-z\d-]+)\/artifacts\/([a-zA-Z0-9-]+\.txt)$/);
  if(req.method==='GET'&&artifactMatch){const run=runs.get(artifactMatch[1]);if(!run)return send(res,404,{error:'Run not found'});
   const file=artifactMatch[2];if(!run.stageResults.some(x=>x.artifact===file))return send(res,404,{error:'Unknown artifact'});

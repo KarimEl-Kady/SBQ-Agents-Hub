@@ -2,6 +2,16 @@
 
 > **Based on the original v0.5.1 chat-first desktop UI.** This is a source-code reliability release, not a finished paid product, not a native Avalonia app, and not a guarantee of compatibility with every live provider account.
 
+## Project files and dependencies
+
+Implementation stages inspect the target repository's setup instructions and can create project files needed for the task. Enable **Allow project dependency setup and network access** on the writable stage when its dependencies need downloading. Codex can use its workspace sandbox and private cache; Claude automatically permits the listed JavaScript install commands, while other commands may require an explicit, scoped approval. SBQ offers approval for exact `composer install`, `dotnet restore`, `go mod download`, and `cargo fetch` requests. Other setup commands may need to be run in your own project terminal, then the stage can be retried. Do not supply secrets to SBQ; missing private files or credentials must be provided through your normal project setup.
+
+## Multiple accounts for Claude and Codex
+
+In **Connections**, use **Add account**, give it a label, and select **Sign in / Reconnect** to complete the official CLI login in a terminal. The account selector switches between named profiles and the existing default CLI session. The selected profile is used for authentication checks and subsequent workflow stages, including retries. Switching is disabled while a workflow is running or awaiting a permission decision. A workflow paused for recovery can continue under the newly selected account.
+
+Each named profile has a separate CLI configuration directory, so settings, plugins, and session history may differ from the default. SBQ does not copy credentials. Provider environment variables such as API keys can affect which credentials a CLI uses. Other agents continue to use their own CLI's existing account management; named profiles are currently available for Claude and Codex only.
+
 ## What this release actually changes
 
 - **Fail before spending architect tokens:** before starting the first stage, SBQ checks whether every configured runner exists, checks official free login-status signals where available, and verifies Codex's local Linux sandbox. A downstream Codex sandbox failure blocks the *whole* run before Claude/Opus planning starts.
@@ -39,7 +49,7 @@ Ubuntu 24.04 and newer restrict unprivileged user namespaces, which breaks two t
 
 Do not run the app as root or with `--no-sandbox`. Electron's VSync warnings are harmless.
 
-**Package installs inside stages:** implementation and support stages may now run the project's own `npm install` / `npm ci` / `pnpm install` / `yarn install`. Codex gets network access inside its workspace sandbox and a private package cache in `~/.sbq-agents-hub/agent-cache/`, and Claude gets permission for exactly those install commands. Planning, review and release stages stay read-only and offline. Turn this off per stage in Workflows → stage → *Allow project package installs*. With it off, a project whose dependencies are not installed is blocked before planning, as before.
+**Package installs inside stages:** implementation and support stages may now run the project's own `npm install` / `npm ci` / `pnpm install` / `yarn install`. Codex gets network access inside its workspace sandbox and a private package cache in `~/.sbq-agents-hub/agent-cache/`, and Claude gets permission for exactly those install commands. Planning, review and release stages stay read-only and offline. Turn this off per stage in Workflows → stage → *Allow project package installs*. With it off, agents can still work, but cannot install packages or use network access for that stage. Missing Node.js packages appear as a warning and may limit verification.
 
 **VS Code extension:** if neither the desktop app nor `npm run engine` is running, the extension starts its own bundled engine (created by `npm run sync:extension` / `npm run extension:package`).
 
@@ -442,7 +452,7 @@ This version stays on the v0.5.1-based Electron desktop UX. The prior v0.5.13 so
 
 ### Preflight before spending model tokens
 
-Set the **Project directory** to the actual repository or local folder and use **Retry preflight**. For an existing Node.js project, SBQ examines `package.json` files at the root and in common `apps/*` / `packages/*` locations, checks whether required local packages are installed (including packages hoisted to root `node_modules`), and stops before Planning if required packages are missing. The check deliberately does not execute package scripts, read credentials, or contact an AI provider. A new empty directory is allowed. Yarn Plug'n'Play is recognized.
+Set the **Project directory** to the actual repository or local folder and use **Retry preflight**. For an existing Node.js project, SBQ examines `package.json` files at the root and in common `apps/*` / `packages/*` locations, checks whether required local packages are installed (including packages hoisted to root `node_modules`), and warns if declared packages are missing; it does not prevent work on other parts of a mixed-language repository. The check deliberately does not execute package scripts, read credentials, or contact an AI provider. A new empty directory is allowed. Yarn Plug'n'Play is recognized.
 
 To diagnose your CRM folder from Ubuntu, without invoking any model:
 

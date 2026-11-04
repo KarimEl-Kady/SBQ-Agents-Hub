@@ -1,5 +1,5 @@
 // Read-only dependency readiness. This never runs install scripts or AI models.
-import { existsSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, lstatSync, statSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep } from 'node:path';
 
 const WORKSPACE_DIRS=['apps','packages','services'];
@@ -38,7 +38,7 @@ function dependencyFound(base,root,name){
  // Dependencies may be hoisted to the repository root by npm workspaces.
  let dir=base;
  while(true){
-  if(isDirectory(join(dir,'node_modules',...name.split('/'))))return true;
+  try{if(statSync(join(dir,'node_modules',...name.split('/'))).isDirectory())return true;}catch{}
   if(dir===root)break;
   const next=dirname(dir);if(next===dir||relative(root,next)==='..'||relative(root,next).startsWith('..'+sep))break;
   dir=next;
@@ -69,7 +69,7 @@ export function checkProjectDependencies(cwd){
  if(missing.length){
   const manager=detectPackageManager(root);
   const installHint=manager==='npm'?(existsSync(join(root,'package-lock.json'))?'npm ci':'npm install'):`${manager} install`;
-  return{status:'blocked',code:'PROJECT_DEPENDENCIES_MISSING',detail:`${missing.length} required package(s) not installed. Install dependencies on the HOST with your permission before using AI tokens. Suggested command in ${root}: ${installHint}. Review package scripts before running it; do not use sudo.`,manager,installHint,missing:missing.slice(0,20),missingCount:missing.length,checked,manifests:all.map(x=>relative(root,x.file))};
+  return{status:'warning',code:'PROJECT_DEPENDENCIES_MISSING',detail:`${missing.length} declared Node.js package(s) were not found. They may be needed for tests or builds; inspect the relevant project and installation instructions. Do not use sudo.`,manager,installHint,missing:missing.slice(0,20),missingCount:missing.length,checked,manifests:all.map(x=>relative(root,x.file))};
  }
  return{status:'ready',detail:`Checked ${checked} existing Node.js dependencies in ${all.length} manifest(s). This does not prove build or tests pass.`,missing:[],checked,manifests:all.map(x=>relative(root,x.file))};
 }

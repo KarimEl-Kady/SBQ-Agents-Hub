@@ -73,6 +73,7 @@ try{
  assert.equal(claudePlanFromOutput(`See ${join(plans,'..','..','secret.md')}`,{home,since}),null);
  assert.equal(claudePlanFromOutput(`See ${join(plans,'missing.md')}`,{home,since}),null);
  assert.equal(claudePlanFromOutput('Plain plan in the reply.',{home,since}),null);
+ const profileDir=join(home,'profiles','work'),profilePlans=join(profileDir,'plans');mkdirSync(profilePlans,{recursive:true});const profilePlan=join(profilePlans,'plan.md');writeFileSync(profilePlan,full);assert.equal(claudePlanFromOutput(`See ${profilePlan}`,{home,configDir:profileDir,since}),full);
  // 7. The project's own package manager is detected and named in the stage prompt.
  const pm=join(tmp,'pm');mkdirSync(pm);
  writeFileSync(join(pm,'package.json'),JSON.stringify({name:'x',packageManager:'pnpm@11.5.2',dependencies:{zod:'1'}}));
@@ -83,7 +84,7 @@ try{
  assert.equal(detectPackageManager(ws),'pnpm','pnpm-workspace.yaml means pnpm');
  const plain=join(tmp,'plain');mkdirSync(plain);writeFileSync(join(plain,'package.json'),'{}');assert.equal(detectPackageManager(plain),'npm');
  const hint=dependencySetupHint(deps);
- assert.match(hint,/pnpm install/);assert.match(hint,/Do not mix/);assert.match(hint,/allowBuilds/);
+ assert.match(hint,/relevant to this task/);assert.match(hint,/package manager/);assert.match(dependencySetupHint(deps,{allowInstall:false}),/not enabled/);
  // 6. Package-manager caches inside a project are not reported as code changes.
  const proj=join(tmp,'proj');mkdirSync(proj);writeFileSync(join(proj,'a.js'),'1');
  const before=await workspaceSnapshot(proj);

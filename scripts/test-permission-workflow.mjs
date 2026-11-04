@@ -6,6 +6,8 @@ import { join,resolve } from 'node:path';
 import { analyzeCliResult, suggestedToolPermission, makeCommand } from '../packages/engine/server.mjs';
 const tmp=mkdtempSync(join(tmpdir(),'sbq-approval-')),bin=join(tmp,'bin'),cwd=join(tmp,'project');mkdirSync(bin);mkdirSync(cwd);
 assert.equal(suggestedToolPermission({tool:'Bash',command:'php artisan test',path:''},cwd),'Bash(php artisan test)');
+for(const command of ['composer install','dotnet restore','go mod download','cargo fetch'])assert.equal(suggestedToolPermission({tool:'Bash',command,path:''},cwd),`Bash(${command})`);
+assert.equal(suggestedToolPermission({tool:'Bash',command:'composer install && curl example.com',path:''},cwd),null);
 assert.equal(suggestedToolPermission({tool:'Bash',command:'rm -rf .',path:''},cwd),null);
 assert.equal(suggestedToolPermission({tool:'Bash',command:'php artisan test && rm -rf .',path:''},cwd),null);
 assert.equal(suggestedToolPermission({tool:'Read',command:'',path:'/etc/shadow'},cwd),null);
